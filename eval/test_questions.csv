@@ -1,0 +1,31 @@
+id,question,expected_route,employee_id,expected_source,expected_answer
+1,How many annual leave days do employees get each year?,policy,,leave_policy.md 2.1,20 days per calendar year
+2,How far in advance must I apply for annual leave?,policy,,leave_policy.md 2.2,At least 3 working days
+3,How many sick leave days are allowed per year?,policy,,leave_policy.md 3.1,10 days
+4,When do I need a medical certificate?,policy,,leave_policy.md 3.2,When sick leave covers 3 or more consecutive days
+5,How many unused annual leave days can I carry forward?,policy,,leave_policy.md 4.2,Up to 5 days
+6,When do carried-forward leave days expire?,policy,,leave_policy.md 4.2,31 March of the next year
+7,Can I get paid for my unused leave?,policy,,leave_policy.md 4.3,"No, unused leave cannot be exchanged for cash"
+8,How long is maternity leave?,policy,,leave_policy.md 5.1,12 weeks paid
+9,How many days of paternity leave do I get?,policy,,leave_policy.md 5.2,"5 working days, within 30 days of the birth"
+10,What are the standard working hours?,policy,,attendance_policy.md 1.1,"Monday to Friday, 9:00 to 18:00"
+11,What is the grace period for coming late?,policy,,attendance_policy.md 2.1,"15 minutes, up to 3 times per month"
+12,By what time must I inform my manager if I cannot come to work?,policy,,attendance_policy.md 3.1,By 10:00 the same day
+13,What expenses can I claim on a business trip?,policy,,reimbursement_policy.md 1.1,"Travel, accommodation and meals on approved trips, approved client costs and training fees"
+14,What is the daily meal limit on a business trip?,policy,,reimbursement_policy.md 2.1,"PKR 3,000 per day"
+15,How long do I have to submit an expense claim?,policy,,reimbursement_policy.md 3.1,Within 30 days of the expense
+16,How long does reimbursement take once approved?,policy,,reimbursement_policy.md 4.1,Within 10 working days
+17,How many days a week can I work from home?,policy,,remote_work_policy.md 2.1,Up to 2 days per week
+18,When am I eligible for remote work?,policy,,remote_work_policy.md 1.1,"After 6 months of service, with manager approval"
+19,Do I need a VPN when working remotely?,policy,,remote_work_policy.md 5.1,"Yes, a VPN is required"
+20,How many annual leave days do I have left?,balance,EMP001,Employee records,14
+21,How many sick leave days have I used?,balance,EMP002,Employee records,5
+22,How many sick leave days do I have remaining?,balance,EMP002,Employee records,5
+23,What is my annual leave balance?,balance,EMP003,Employee records,17
+24,How many annual leave days have I taken so far?,balance,EMP004,Employee records,9
+25,Do I have any sick leave left?,balance,EMP005,Employee records,"Yes, 6 days"
+26,My manager is harassing me.,escalate,,,Escalate to HR (sensitive)
+27,I want to file a complaint against a colleague.,escalate,,,Escalate to HR (sensitive)
+28,I was treated unfairly in my performance review.,escalate,,,Escalate to HR (sensitive)
+29,Can you tell me what my current salary is?,escalate,,,Escalate to HR (no source in policies)
+30,What dental insurance coverage does the company offer?,escalate,,,Escalate to HR (no source in policies)

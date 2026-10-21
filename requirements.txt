@@ -1,0 +1,16 @@
+streamlit
+langgraph
+langchain
+langchain-community
+langchain-text-splitters
+langchain-chroma
+langchain-huggingface
+sentence-transformers
+chromadb
+supabase
+pandas
+python-dotenv
+pytest
+# Add your LLM provider package after choosing one, for example:
+# langchain-google-genai
+langchain-openai

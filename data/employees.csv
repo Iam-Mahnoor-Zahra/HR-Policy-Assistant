@@ -1,0 +1,11 @@
+employee_id,name,annual_total,annual_used,sick_total,sick_used
+EMP001,Ayesha,20,6,10,2
+EMP002,Bilal,20,12,10,5
+EMP003,Sara,20,3,10,0
+EMP004,Usman,20,9,10,1
+EMP005,Hina,20,15,10,4
+EMP006,Ali,20,0,10,0
+EMP007,Fatima,20,8,10,3
+EMP008,Hamza,20,18,10,6
+EMP009,Zainab,20,5,10,2
+EMP010,Omar,20,11,10,7
