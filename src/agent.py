@@ -74,10 +74,14 @@ def _asks_own_balance(question: str) -> bool:
 GREETING = re.compile(r"(hi+|hello|hey|salam|assalam[\w\s]*|thanks|thank you|thx|ok|okay)[\s!.?]*", re.I)
 
 HELP_TEXT = (
-    "I'm the HR Policy Assistant. I can answer questions about company HR policies, "
+    "Hi, I'm the HR Policy Assistant. I can answer questions about company HR policies, "
     "check your leave balance, and point you to HR for sensitive matters. "
     "What would you like to know?"
 )
+
+
+REWRITE_PROMPT = """Rewrite the employee's latest message as one complete, standalone question. Use the chat history only to fill in missing details, for example what "that" or "and sick leave?" refers to.
+Do not answer it. If the message already makes sense on its own, return it unchanged. Output only the question."""
 
 
 class Route(BaseModel):
@@ -97,6 +101,34 @@ class AgentState(TypedDict, total=False):
     path: str
     citations: list
     request_id: int
+
+
+def _has_sensitive_word(question: str) -> bool:
+    return any(word in question.lower() for word in SENSITIVE_WORDS)
+
+
+def _standalone_question(question: str, history: list | None) -> str:
+    """Turn a short follow-up ("and sick leave?") into a full question using the recent chat.
+
+    Only runs when there is chat history and the message is short, so most questions
+    cost nothing extra. Greetings and sensitive messages are never rewritten.
+    """
+    if not history:
+        return question
+    if GREETING.fullmatch(question.strip()) or _has_sensitive_word(question):
+        return question
+    if len(question.split()) > 8:
+        return question
+    transcript = "\n".join(f"{m['role']}: {m['content']}" for m in history[-6:])
+    try:
+        reply = get_llm().invoke(
+            [("system", REWRITE_PROMPT),
+             ("human", f"Chat history:\n{transcript}\n\nLatest message: {question}")]
+        )
+        text = (reply.content or "").strip()
+    except Exception:
+        return question
+    return text if text and len(text) <= 300 else question
 
 
 def classify(state: AgentState) -> dict:
@@ -205,9 +237,13 @@ def _build_graph():
 graph = _build_graph()
 
 
-def run_agent(employee_id: str, question: str) -> dict:
-    """Run one question. Returns {"reply", "path", "citations", "request_id"}."""
-    out = graph.invoke({"employee_id": employee_id, "question": question})
+def run_agent(employee_id: str, question: str, history: list | None = None) -> dict:
+    """Run one question. Returns {"reply", "path", "citations", "request_id"}.
+
+    history: earlier messages of this chat as [{"role": "user" or "assistant", "content": "..."}].
+    """
+    standalone = _standalone_question(question, history)
+    out = graph.invoke({"employee_id": employee_id, "question": standalone})
     return {
         "reply": out["reply"],
         "path": out["path"],

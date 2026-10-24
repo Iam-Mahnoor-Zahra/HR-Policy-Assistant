@@ -1,0 +1,294 @@
+"""HR Policy Assistant: the Streamlit app.
+
+Run from the project root:   streamlit run app.py
+"""
+import hmac
+import html
+import os
+from pathlib import Path
+
+import streamlit as st
+
+
+def _load_secrets_into_env():
+    """On hosting platforms, settings live in st.secrets. Copy them into the environment."""
+    try:
+        for key in st.secrets:
+            value = st.secrets[key]
+            if isinstance(value, (str, int, float, bool)):
+                os.environ.setdefault(key, str(value))
+    except Exception:
+        pass  # no secrets file when running locally: the .env file is used instead
+
+
+_load_secrets_into_env()
+
+from dotenv import load_dotenv  # noqa: E402
+
+load_dotenv()
+
+from src import db  # noqa: E402
+from src.agent import run_agent  # noqa: E402
+
+MAX_CHARS = int(os.getenv("MAX_QUESTION_CHARS", "500"))
+HR_EMAIL = os.getenv("HR_EMAIL", "hr@examplecorp.com")
+EXAMPLES = [
+    "How many leave days can I carry forward?",
+    "How many annual leave days do I have left?",
+    "What is the daily meal limit on a business trip?",
+]
+
+st.set_page_config(page_title="HR Policy Assistant", page_icon="💬", layout="wide")
+
+# Layout styling. Colors come from the theme (light or dark), so both modes work.
+STYLE = """
+<style>
+/* chat bubbles: employee on the right, assistant on the left (colors follow light or dark mode) */
+[class*="st-key-msg_user_"] > [data-testid="stElementContainer"]:has(> [data-testid="stMarkdown"]) {
+    width: fit-content; max-width: 75%; margin-left: auto;
+}
+[class*="st-key-msg_bot_"] > [data-testid="stElementContainer"]:has(> [data-testid="stMarkdown"]) {
+    width: fit-content; max-width: 80%;
+}
+[class*="st-key-msg_user_"] [data-testid="stMarkdown"] {
+    background: rgba(99, 102, 241, 0.2); border-radius: 18px 18px 4px 18px; padding: 0.6rem 1rem;
+}
+[class*="st-key-msg_bot_"] [data-testid="stMarkdown"] {
+    background: color-mix(in srgb, currentColor 8%, transparent);
+    border-radius: 18px 18px 18px 4px; padding: 0.6rem 1rem;
+}
+[class*="st-key-msg_user_"] [data-testid="stMarkdown"] p,
+[class*="st-key-msg_bot_"] [data-testid="stMarkdown"] p { margin-bottom: 0; }
+[class*="st-key-msg_user_"] [data-testid="stMarkdownContainer"],
+[class*="st-key-msg_bot_"] [data-testid="stMarkdownContainer"] { margin-bottom: 0 !important; }
+/* sidebar: chats at the top, user card pinned to the bottom */
+[data-testid="stSidebarContent"] { display: flex; flex-direction: column; height: 100%; }
+[data-testid="stSidebarUserContent"] { flex: 1 1 auto; display: flex; flex-direction: column; }
+[data-testid="stSidebarUserContent"] > div { flex: 1 1 auto; display: flex; flex-direction: column; }
+[data-testid="stSidebarUserContent"] > div > [data-testid="stVerticalBlock"] { flex: 1 1 auto; }
+[data-testid="stLayoutWrapper"]:has(> [class*="st-key-side_bottom"]) { margin-top: auto; }
+/* user card */
+.user-card { display: flex; align-items: center; gap: 0.7rem; padding: 0.4rem 0; }
+.avatar { width: 38px; height: 38px; border-radius: 50%; display: flex; align-items: center;
+    justify-content: center; font-weight: 700; color: #fff; background: #4F46E5; }
+.uname { font-weight: 600; line-height: 1.2; }
+.uid { font-size: 0.8rem; opacity: 0.65; }
+.welcome { text-align: center; margin: 12vh 0 1.5rem 0; }
+.welcome h2 { margin-bottom: 0.2rem; }
+.welcome p { opacity: 0.7; }
+</style>
+"""
+
+
+@st.cache_resource(show_spinner="Preparing the knowledge base (first start only)...")
+def prepare_knowledge_base():
+    """Build the policy index if it does not exist yet, and load it into memory once."""
+    if os.getenv("SKIP_KB_SETUP") == "1":  # used by the automatic tests
+        return True
+    if not Path("chroma_db").exists():
+        from src.ingest import main as build_index
+
+        build_index()
+    from src.qa import _cached_store
+
+    _cached_store()
+    return True
+
+
+def wide_button(label, **kwargs):
+    """A full-width button that works on both newer and older Streamlit versions."""
+    try:
+        return st.button(label, width="stretch", **kwargs)
+    except TypeError:
+        return st.button(label, use_container_width=True, **kwargs)
+
+
+# ------------------------------------------------------------ chat bookkeeping
+def new_chat():
+    chat_id = st.session_state.next_id
+    st.session_state.next_id += 1
+    st.session_state.chats[chat_id] = {"title": "New chat", "messages": []}
+    st.session_state.order.insert(0, chat_id)
+    st.session_state.current = chat_id
+
+
+def start_session(employee: dict):
+    st.session_state.employee = {"id": employee["employee_id"], "name": employee["name"]}
+    st.session_state.chats = {}
+    st.session_state.order = []
+    st.session_state.next_id = 1
+    new_chat()
+
+
+def short(text: str, limit: int = 30) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+# ---------------------------------------------------------------- login screen
+def login_screen():
+    app_password = os.getenv("APP_PASSWORD", "")
+    if not app_password:
+        st.error("The app password is not set. Add APP_PASSWORD to your .env file or hosting secrets.")
+        st.stop()
+
+    _, middle, _ = st.columns([1, 1.4, 1])
+    with middle:
+        st.markdown(
+            "<div class='welcome' style='margin-top:10vh'><h2>HR Policy Assistant</h2>"
+            "<p>Sign in to ask about HR policies, check your leave balance, "
+            "or get pointed to HR.</p></div>",
+            unsafe_allow_html=True,
+        )
+        with st.form("login"):
+            employee_id = st.text_input("Employee ID", placeholder="EMP001")
+            password = st.text_input("Password", type="password")
+            submitted = st.form_submit_button("Log in")
+
+        if submitted:
+            emp_id = employee_id.strip().upper()
+            password_ok = hmac.compare_digest(password.encode(), app_password.encode())
+            try:
+                employee = db.fetch_employee(emp_id) if emp_id else None
+            except Exception as e:
+                print(f"[error] login lookup failed: {e}")
+                st.error("Could not reach the database. Please try again.")
+                return
+            if password_ok and employee:
+                start_session(employee)
+                st.rerun()
+            else:
+                st.error("Invalid employee ID or password.")
+
+
+# ----------------------------------------------------------------- chat screen
+def show_message(chat_id: int, index: int, msg: dict):
+    role = "user" if msg["role"] == "user" else "bot"
+    with st.container(key=f"msg_{role}_{chat_id}_{index}"):
+        st.markdown(msg["content"].replace("\n", "  \n"))
+        citations = msg.get("citations") or []
+        shown_files = set()
+        for c in citations:
+            if c["file"] in shown_files:
+                continue
+            shown_files.add(c["file"])
+            path = Path(c["path"])
+            if path.exists():
+                st.download_button(
+                    f"Download {c['policy']}",
+                    data=path.read_bytes(),
+                    file_name=c["file"],
+                    mime="text/markdown",
+                    key=f"download_{chat_id}_{index}_{c['file']}",
+                )
+        if citations:
+            with st.expander("Show the policy text"):
+                for c in citations:
+                    st.markdown(f"**{c['label']}**")
+                    st.write(c["excerpt"])
+
+
+def sidebar():
+    employee = st.session_state.employee
+    with st.sidebar:
+        with st.container(key="side_top"):
+            st.markdown("#### HR Policy Assistant")
+            if wide_button("＋ New chat", key="new_chat", type="primary"):
+                if st.session_state.chats[st.session_state.current]["messages"]:
+                    new_chat()
+                st.rerun()
+            st.caption("Previous chats")
+            for chat_id in st.session_state.order:
+                chat = st.session_state.chats[chat_id]
+                if not chat["messages"]:
+                    continue
+                active = chat_id == st.session_state.current
+                if wide_button(
+                    short(chat["title"]),
+                    key=f"open_{chat_id}",
+                    type="secondary" if active else "tertiary",
+                ):
+                    st.session_state.current = chat_id
+                    st.rerun()
+
+        with st.container(key="side_bottom"):
+            st.divider()
+            initial = html.escape(employee["name"][:1].upper())
+            st.markdown(
+                f"<div class='user-card'><div class='avatar'>{initial}</div><div>"
+                f"<div class='uname'>{html.escape(employee['name'])}</div>"
+                f"<div class='uid'>{html.escape(employee['id'])}</div></div></div>",
+                unsafe_allow_html=True,
+            )
+            if wide_button("Log out", key="logout"):
+                st.session_state.clear()
+                st.rerun()
+
+
+def chat_screen():
+    employee = st.session_state.employee
+    sidebar()
+
+    chat_id = st.session_state.current
+    chat = st.session_state.chats[chat_id]
+    messages = chat["messages"]
+
+    clicked = None
+    if not messages:
+        st.markdown(
+            f"<div class='welcome'><h2>Hello, {html.escape(employee['name'])}</h2>"
+            "<p>Ask about HR policies or your leave. Answers show their source.</p></div>",
+            unsafe_allow_html=True,
+        )
+        _, middle, _ = st.columns([1, 2, 1])
+        with middle:
+            for i, example in enumerate(EXAMPLES):
+                if wide_button(example, key=f"example_{i}"):
+                    clicked = example
+
+    for i, msg in enumerate(messages):
+        show_message(chat_id, i, msg)
+
+    prompt = st.chat_input("Ask a question about HR policies or your leave") or clicked
+    if not prompt:
+        return
+    prompt = prompt.strip()
+    if len(prompt) > MAX_CHARS:
+        st.warning(f"Please keep your question under {MAX_CHARS} characters (yours has {len(prompt)}).")
+        return
+
+    history = [{"role": m["role"], "content": m["content"]} for m in messages]
+    user_msg = {"role": "user", "content": prompt}
+    show_message(chat_id, len(messages), user_msg)
+    messages.append(user_msg)
+    if chat["title"] == "New chat":
+        chat["title"] = prompt
+
+    with st.spinner("Thinking..."):
+        try:
+            result = run_agent(employee["id"], prompt, history=history)
+            reply = {
+                "role": "assistant",
+                "content": result["reply"],
+                "citations": result["citations"],
+                "path": result["path"],
+            }
+        except Exception as e:
+            print(f"[error] agent failed: {e}")
+            reply = {
+                "role": "assistant",
+                "content": f"Sorry, something went wrong. Please try again, or email HR at {HR_EMAIL}.",
+            }
+    show_message(chat_id, len(messages), reply)
+    messages.append(reply)
+    st.rerun()
+
+
+# ------------------------------------------------------------------------ main
+st.markdown(STYLE, unsafe_allow_html=True)
+prepare_knowledge_base()
+
+if "employee" not in st.session_state:
+    login_screen()
+else:
+    chat_screen()

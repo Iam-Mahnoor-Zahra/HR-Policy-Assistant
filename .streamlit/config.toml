@@ -1,0 +1,13 @@
+# Colors for the two built-in themes. Streamlit picks one from the device setting,
+# and users can switch in the top-right menu: Settings > Theme.
+[theme.light]
+primaryColor = "#4F46E5"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F3F4F8"
+textColor = "#1F2937"
+
+[theme.dark]
+primaryColor = "#818CF8"
+backgroundColor = "#0F1117"
+secondaryBackgroundColor = "#1A1D27"
+textColor = "#E5E7EB"
