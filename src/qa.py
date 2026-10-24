@@ -7,6 +7,7 @@ Run without a question to chat in the terminal.
 """
 import os
 import sys
+from functools import lru_cache
 
 from pydantic import BaseModel, Field
 
@@ -33,9 +34,15 @@ class PolicyAnswer(BaseModel):
     used_sources: list[int] = Field(description="Numbers of the sources used for the answer")
 
 
+@lru_cache(maxsize=1)
+def _cached_store():
+    """Build the store once, so the embedding model is loaded only once per run."""
+    return get_store()
+
+
 def search_policies(question: str, k: int = TOP_K):
     """Return (chunk, distance) pairs that are close enough to the question."""
-    hits = get_store().similarity_search_with_score(question, k=k)
+    hits = _cached_store().similarity_search_with_score(question, k=k)
     return [(doc, score) for doc, score in hits if score <= MAX_DISTANCE]
 
 
@@ -98,7 +105,7 @@ def _print_result(r: dict):
 
 def _debug(question: str):
     print("\nClosest chunks (lower distance = closer):")
-    for doc, score in get_store().similarity_search_with_score(question, k=5):
+    for doc, score in _cached_store().similarity_search_with_score(question, k=5):
         flag = "keep" if score <= MAX_DISTANCE else "drop"
         m = doc.metadata
         print(f"  {score:.3f} [{flag}]  {m['file_name']} {m['section']} {m['title']}")

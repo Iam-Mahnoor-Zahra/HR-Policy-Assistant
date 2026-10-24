@@ -33,8 +33,8 @@ ROUTER_PROMPT = """Classify the employee's message into one route.
 
 sensitive: complaints, harassment, bullying, discrimination, unfair treatment, conflicts with a manager or colleague, legal, medical or mental health matters, or a request to talk to a person.
 balance: ONLY when the employee asks for their OWN current leave numbers (days left, used or total).
-policy: any question about company rules, limits, eligibility or procedures, even if it mentions "I" or leave days.
-other: greetings, thanks, questions about what the assistant can do, or anything not related to HR or work.
+policy: any question about company rules, limits, eligibility or procedures, or any other HR topic (pay, benefits, insurance, contracts), even if it mentions "I" or leave days. A later step checks whether the documents cover it.
+other: ONLY greetings, thanks, questions about what the assistant can do, or topics clearly unrelated to work.
 
 Examples:
 - "How many annual leave days do I have left?" -> balance (annual, remaining)
@@ -44,6 +44,7 @@ Examples:
 - "How many annual leave days do employees get each year?" -> policy (it asks about a rule)
 - "How long do I have to submit an expense claim?" -> policy
 - "My manager is treating me badly" -> sensitive
+- "What is my current salary?" -> policy (an HR topic, the document search will decide)
 - "Hi" -> other
 - "What can you do?" -> other
 - "What is the weather today?" -> other
@@ -57,16 +58,23 @@ OWN_HINTS = re.compile(r"\b(my|i have|have i|i've|left|remaining|balance|taken)\
 LEAVE_HINTS = re.compile(r"\b(leave|leaves|annual|sick|vacation|holiday|holidays)\b", re.I)
 
 
+# HR topics must never end up in the small-talk route.
+HR_TOPICS = re.compile(
+    r"\b(salary|salaries|pay|payslip|bonus|insurance|benefit|benefits|contract|resign|resignation|"
+    r"terminate|termination|promotion|appraisal|increment|raise)\b",
+    re.I,
+)
+
+
 def _asks_own_balance(question: str) -> bool:
     return bool(OWN_HINTS.search(question) and LEAVE_HINTS.search(question))
 
 
 # Plain greetings and thanks are answered without calling the model.
 GREETING = re.compile(r"(hi+|hello|hey|salam|assalam[\w\s]*|thanks|thank you|thx|ok|okay)[\s!.?]*", re.I)
-THANKS = re.compile(r"\b(thanks|thank you|thx)\b", re.I)
 
 HELP_TEXT = (
-    "Hi, I'm the HR Policy Assistant. I can answer questions about company HR policies, "
+    "I'm the HR Policy Assistant. I can answer questions about company HR policies, "
     "check your leave balance, and point you to HR for sensitive matters. "
     "What would you like to know?"
 )
@@ -102,6 +110,8 @@ def classify(state: AgentState) -> dict:
     if decision.route == "sensitive":
         return {"route": "sensitive", "escalation_reason": "sensitive topic"}
     if decision.route == "other":
+        if HR_TOPICS.search(state["question"]):
+            return {"route": "policy"}
         return {"route": "other"}
     if decision.route == "balance" and not _asks_own_balance(state["question"]):
         return {"route": "policy"}
@@ -144,8 +154,6 @@ def balance_node(state: AgentState) -> dict:
 
 
 def other_node(state: AgentState) -> dict:
-    if THANKS.search(state["question"]):
-        return {"reply": "You're welcome! Let me know if you need anything else.", "path": "other"}
     return {"reply": HELP_TEXT, "path": "other"}
 
 

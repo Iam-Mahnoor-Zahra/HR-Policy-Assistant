@@ -35,7 +35,7 @@ Only annual leave can be carried forward. Sick leave cannot be carried forward.
 Employees may carry forward up to 5 unused annual leave days into the next calendar year. Carried-forward days must be used by 31 March of the next year, or they expire.
 
 ### 4.3 Encashment
-Unused leave days cannot be exchanged for cash.
+Unused leave days cannot be exchanged for cash. Employees are not paid for unused leave days.
 
 ## 5. Maternity and Paternity Leave
 

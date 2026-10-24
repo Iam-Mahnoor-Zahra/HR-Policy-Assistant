@@ -112,3 +112,13 @@ def test_model_marked_other_is_not_escalated(monkeypatch):
     monkeypatch.setattr(tools, "escalate", lambda *a: (_ for _ in ()).throw(AssertionError("no escalation")))
     out = agent.run_agent("EMP001", "What is the weather today?")
     assert out["path"] == "other"
+
+
+def test_salary_question_is_not_small_talk(monkeypatch):
+    """The model says 'other', but salary is an HR topic. With no source it is escalated."""
+    _patch_tools(monkeypatch)
+    monkeypatch.setattr(agent, "get_llm", lambda: _Router(agent.Route(route="other")))
+    monkeypatch.setattr(agent, "answer_policy_question", lambda q: {
+        "found": False, "answer": "", "citations": [], "reason": "no relevant policy text"})
+    out = agent.run_agent("EMP001", "Can you tell me what my current salary is?")
+    assert out["path"] == "escalate"
