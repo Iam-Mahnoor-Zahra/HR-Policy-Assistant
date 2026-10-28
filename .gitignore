@@ -221,3 +221,7 @@ __marimo__/
 
 # Local vector store
 chroma_db/
+
+# Google Cloud Service Account Keys
+*service-account*.json
+google-key*.json

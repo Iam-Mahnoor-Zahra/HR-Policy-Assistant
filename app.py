@@ -107,7 +107,7 @@ def wide_button(label, **kwargs):
 def new_chat():
     chat_id = st.session_state.next_id
     st.session_state.next_id += 1
-    st.session_state.chats[chat_id] = {"title": "New chat", "messages": []}
+    st.session_state.chats[chat_id] = {"title": "New chat", "messages": [], "pending": None}
     st.session_state.order.insert(0, chat_id)
     st.session_state.current = chat_id
 
@@ -266,13 +266,14 @@ def chat_screen():
 
     with st.spinner("Thinking..."):
         try:
-            result = run_agent(employee["id"], prompt, history=history)
+            result = run_agent(employee["id"], prompt, history=history, pending=chat.get("pending"))
             reply = {
                 "role": "assistant",
                 "content": result["reply"],
                 "citations": result["citations"],
                 "path": result["path"],
             }
+            chat["pending"] = result.get("pending")  # an unanswered yes/no step stays with this chat
         except Exception as e:
             print(f"[error] agent failed: {e}")
             reply = {

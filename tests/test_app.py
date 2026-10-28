@@ -19,9 +19,10 @@ def fake_backend(monkeypatch):
     )
     calls = []
 
-    def fake_run_agent(employee_id, question, history=None):
-        calls.append((employee_id, question, history))
+    def fake_run_agent(employee_id, question, history=None, pending=None):
+        calls.append((employee_id, question, history, pending))
         return {
+            "pending": {"type": "escalate_offer"} if question == "offer" else None,
             "reply": "Up to 5 days.\nSource: Leave Policy, Section 4.2 (Carry-forward limit)",
             "path": "policy",
             "request_id": None,
@@ -124,3 +125,14 @@ def test_logout_returns_to_login():
     at = _logged_in()
     _button(at, "logout").click().run()
     assert "employee" not in at.session_state
+
+
+def test_a_pending_step_stays_with_its_chat(fake_backend):
+    at = _logged_in()
+    at.chat_input[0].set_value("offer").run()
+    assert at.session_state["chats"][1]["pending"] == {"type": "escalate_offer"}
+    at.chat_input[0].set_value("yes").run()
+    assert fake_backend[1][3] == {"type": "escalate_offer"}  # the next message received it
+    _button(at, "new_chat").click().run()
+    at.chat_input[0].set_value("a new question").run()
+    assert fake_backend[2][3] is None  # a new chat starts without a pending step

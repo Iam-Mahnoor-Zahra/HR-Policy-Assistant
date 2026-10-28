@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from src import agent, tools
+from src import agent
 
 
 class _Model:
@@ -53,7 +53,6 @@ def test_no_history_means_no_rewrite_call(monkeypatch):
 def test_long_questions_greetings_and_sensitive_messages_are_not_rewritten(monkeypatch):
     model = _Model(rewritten="REWRITTEN", decision=agent.Route(route="policy"))
     monkeypatch.setattr(agent, "get_llm", lambda: model)
-    monkeypatch.setattr(tools, "escalate", lambda e, q, r: {"request_id": 7, "hr_email": "hr@x.com"})
     long_q = "How many annual leave days do employees get each calendar year in total?"
     assert agent._standalone_question(long_q, HISTORY) == long_q
     assert agent._standalone_question("Hi", HISTORY) == "Hi"

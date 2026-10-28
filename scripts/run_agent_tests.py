@@ -5,8 +5,7 @@ Checks:
   policy    -> path is "policy" and the cited source matches the expected one
   balance   -> path is "balance" and the expected number appears in the reply
   escalate  -> path is "escalate" and the reply contains the HR email
-Note: every escalate question adds a row to the escalations table in Supabase.
-Clear them afterwards in the SQL Editor with:  delete from escalations;
+Note: escalate questions only OFFER to email HR, so nothing is saved or sent by this script.
 """
 import csv
 import os
@@ -37,7 +36,7 @@ def main():
             number = re.findall(r"\d+", r["expected_answer"])[0]
             good = res["path"] == "balance" and number in re.findall(r"\d+", res["reply"])
         else:
-            good = res["path"] == "escalate" and HR_EMAIL in res["reply"]
+            good = res["path"].startswith("escalate") and HR_EMAIL in res["reply"]
         passed += good
         print(f"[{'PASS' if good else 'FAIL'}] #{r['id']} ({route}) {r['question']}")
         if not good:
