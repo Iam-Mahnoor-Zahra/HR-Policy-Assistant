@@ -5,6 +5,7 @@ Run from the project root:   streamlit run app.py
 import hmac
 import html
 import os
+from datetime import date
 from pathlib import Path
 
 import streamlit as st
@@ -27,7 +28,7 @@ from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv()
 
-from src import db  # noqa: E402
+from src import db, tools  # noqa: E402
 from src.agent import run_agent  # noqa: E402
 
 MAX_CHARS = int(os.getenv("MAX_QUESTION_CHARS", "500"))
@@ -140,25 +141,104 @@ def login_screen():
             "or get pointed to HR.</p></div>",
             unsafe_allow_html=True,
         )
-        with st.form("login"):
-            employee_id = st.text_input("Employee ID", placeholder="EMP001")
-            password = st.text_input("Password", type="password")
-            submitted = st.form_submit_button("Log in")
+        tab_employee, tab_hr = st.tabs(["Employee", "HR"])
+        with tab_employee:
+            with st.form("login"):
+                employee_id = st.text_input("Employee ID", placeholder="EMP001")
+                password = st.text_input("Password", type="password")
+                submitted = st.form_submit_button("Log in")
 
-        if submitted:
-            emp_id = employee_id.strip().upper()
-            password_ok = hmac.compare_digest(password.encode(), app_password.encode())
-            try:
-                employee = db.fetch_employee(emp_id) if emp_id else None
-            except Exception as e:
-                print(f"[error] login lookup failed: {e}")
-                st.error("Could not reach the database. Please try again.")
-                return
-            if password_ok and employee:
-                start_session(employee)
-                st.rerun()
-            else:
-                st.error("Invalid employee ID or password.")
+            if submitted:
+                emp_id = employee_id.strip().upper()
+                password_ok = hmac.compare_digest(password.encode(), app_password.encode())
+                try:
+                    employee = db.fetch_employee(emp_id) if emp_id else None
+                except Exception as e:
+                    print(f"[error] login lookup failed: {e}")
+                    st.error("Could not reach the database. Please try again.")
+                    return
+                if password_ok and employee:
+                    start_session(employee)
+                    st.rerun()
+                else:
+                    st.error("Invalid employee ID or password.")
+
+        with tab_hr:
+            with st.form("hr_login"):
+                hr_password = st.text_input("HR password", type="password")
+                hr_submitted = st.form_submit_button("Open HR page")
+            if hr_submitted:
+                expected = os.getenv("HR_PASSWORD", "")
+                if not expected:
+                    st.error("The HR password is not set. Add HR_PASSWORD to your .env file or hosting secrets.")
+                elif hmac.compare_digest(hr_password.encode(), expected.encode()):
+                    st.session_state.hr_ok = True
+                    st.rerun()
+                else:
+                    st.error("Invalid HR password.")
+
+
+# ----------------------------------------------------------------------- HR page
+def fmt_day(value) -> str:
+    d = date.fromisoformat(str(value)[:10])
+    return f"{d.day} {d.strftime('%b %Y')}"  # no %-d, so it also works on Windows
+
+
+def decide(request_id: int, approve: bool):
+    try:
+        result = tools.decide_leave_request(request_id, approve)
+    except Exception as e:
+        print(f"[error] decision failed: {e}")
+        result = {"ok": False, "message": "Something went wrong. Please check the request and try again."}
+    st.session_state.hr_notice = (result["ok"], result["message"])
+    st.rerun()
+
+
+def hr_screen():
+    with st.sidebar:
+        st.markdown("#### HR page")
+        st.caption("Leave approvals")
+        if wide_button("Log out", key="hr_logout"):
+            st.session_state.clear()
+            st.rerun()
+
+    st.title("Leave requests")
+    notice = st.session_state.pop("hr_notice", None)
+    if notice:
+        (st.success if notice[0] else st.warning)(notice[1])
+
+    try:
+        pending = tools.hr_list_leave_requests(["pending"])
+        decided = tools.hr_list_leave_requests(["approved", "rejected"], limit=10, newest_first=True)
+    except Exception as e:
+        print(f"[error] could not load requests: {e}")
+        st.error("Could not load the requests. Please try again.")
+        return
+
+    st.subheader(f"Waiting for a decision ({len(pending)})")
+    if not pending:
+        st.info("No pending requests.")
+    for r in pending:
+        with st.container(border=True, key=f"req_{r['id']}"):
+            st.markdown(f"**Request #{r['id']}: {html.escape(r['name'])} ({html.escape(r['employee_id'])})**")
+            days = r["working_days"]
+            st.write(
+                f"{r['leave_type'].capitalize()} leave, {fmt_day(r['start_date'])} to "
+                f"{fmt_day(r['end_date'])}, {days} working day{'s' if days != 1 else ''}"
+            )
+            approve_col, reject_col, _ = st.columns([1, 1, 4])
+            if approve_col.button("Approve", key=f"approve_{r['id']}", type="primary"):
+                decide(r["id"], True)
+            if reject_col.button("Reject", key=f"reject_{r['id']}"):
+                decide(r["id"], False)
+
+    if decided:
+        st.subheader("Recent decisions")
+        for r in decided:
+            st.markdown(
+                f"• #{r['id']} {r['name']}, {r['leave_type']} leave, {fmt_day(r['start_date'])} to "
+                f"{fmt_day(r['end_date'])}: **{r['status']}**"
+            )
 
 
 # ----------------------------------------------------------------- chat screen
@@ -289,7 +369,9 @@ def chat_screen():
 st.markdown(STYLE, unsafe_allow_html=True)
 prepare_knowledge_base()
 
-if "employee" not in st.session_state:
+if st.session_state.get("hr_ok"):
+    hr_screen()
+elif "employee" not in st.session_state:
     login_screen()
 else:
     chat_screen()

@@ -4,12 +4,14 @@
                         -> balance   -> leave balance tool
                         -> status    -> request status tool
                         -> holiday   -> holiday lookup
+                        -> leave_request -> rule checks -> ask to confirm (needs the employee's yes)
                         -> other     -> short help message (greetings, thanks, off-topic)
                         -> policy    -> policy search -> answer with citation
                                                       -> no source found -> offer to email HR
 
 Escalation needs two "yes" answers: yes to "shall I email HR?", then yes to the draft.
-Nothing is saved or sent before the second yes. The pending step travels with the chat.
+A leave request needs one "yes" after the summary. HR approves it later on the HR page.
+Nothing is saved or sent before the yes. The pending step travels with the chat.
 
 Try it from the project root (the chat mode keeps the conversation, so the yes/no steps work):
     python -m src.agent --employee EMP003
@@ -26,6 +28,7 @@ from pydantic import BaseModel
 from src import emailer, tools
 from src.llm import get_llm
 from src.qa import answer_policy_question
+from src.tools import today as _local_today
 
 # Safety net: these words always go to HR, without asking the model.
 SENSITIVE_WORDS = (
@@ -34,9 +37,10 @@ SENSITIVE_WORDS = (
     "misbehav", "mistreat", "intimidat", "humiliat", "hostile",
 )
 
-ROUTER_PROMPT = """Classify the employee's message into one route. Today's date is {today}.
+ROUTER_PROMPT = """Classify the employee's message into one route. Today is {today}.
 
-sensitive: complaints, harassment, bullying, discrimination, unfair treatment, conflicts with a manager or colleague, legal, medical or mental health matters, or a request to talk to a person.
+sensitive: complaints, harassment, bullying, discrimination, unfair treatment, conflicts with a manager or colleague, legal or mental health matters, or a request to talk to a person. A request to take leave (even sick leave) is NOT sensitive: it is leave_request.
+leave_request: the employee wants to TAKE or BOOK annual or sick leave, for example "I want annual leave from 3 to 5 November" or "I am unwell and need sick leave for today".
 balance: ONLY when the employee asks for their OWN current leave numbers (days left, used or total).
 status: the employee asks about the status of their own leave request or HR request (pending, approved, rejected, open, replied).
 holiday: the employee asks about company holidays: whether a date is a holiday, or which holidays are coming up.
@@ -56,19 +60,34 @@ Examples:
 - "How long do I have to submit an expense claim?" -> policy
 - "My manager is treating me badly" -> sensitive
 - "What is my current salary?" -> policy (an HR topic, the document search will decide)
+- "I want annual leave from 3 to 5 November" -> leave_request (annual, 3 Nov to 5 Nov of the next one coming)
+- "I am unwell and need sick leave for today and tomorrow" -> leave_request (sick, today to tomorrow)
+- "Can I take next Monday off?" -> leave_request (annual, next Monday)
+- "How many annual leave days can I take?" -> policy (it asks about a rule, it does not book leave)
+- "How do I request sick leave?" -> policy
 - "Hi" -> other
 - "What can you do?" -> other
 - "What is the weather today?" -> other
 
 If the route is balance, also set leave_type (annual, sick or both) and detail (remaining, used or total).
 If the route is status, set request_id only when a number is given, and request_kind (leave, hr or any).
-If the route is holiday, set holiday_date (YYYY-MM-DD) only when one specific date is asked."""
+If the route is holiday, set holiday_date (YYYY-MM-DD) only when one specific date is asked.
+If the route is leave_request, set request_leave_type (annual, sick, or unknown when the type is not clear), and leave_start and leave_end as YYYY-MM-DD. Work out dates like "tomorrow", "next Monday" or "3 to 5 November" from today's date. A date without a year means the next time it comes. For a single day, leave_end equals leave_start. If no dates are given, leave both empty."""
 
 # Second safety nets for the router. A model answer is downgraded to "policy" if the words do not fit.
 OWN_HINTS = re.compile(r"\b(my|i have|have i|i've|left|remaining|balance|taken)\b", re.I)
 LEAVE_HINTS = re.compile(r"\b(leave|leaves|annual|sick|vacation|holiday|holidays)\b", re.I)
 STATUS_HINTS = re.compile(r"\b(status|pending|approved|rejected|request|requests|case|replied|reply|update)\b", re.I)
 HOLIDAY_HINTS = re.compile(r"\b(holiday|holidays|day off|days off|closed|closure)\b", re.I)
+
+# A leave request must contain a leave word and a "wants to take" word, and must not start like a rules question.
+LEAVE_WORDS = re.compile(r"\b(leave|leaves|annual|sick|vacation|day off|days off)\b", re.I)
+REQUEST_WORDS = re.compile(
+    r"\b(want|need|would like|i'd like|apply|applying|request|requesting|book|submit|take|taking|off)\b", re.I
+)
+INFO_QUESTION = re.compile(
+    r"^\s*(how (many|much|long|do|does)|what (is|are|happens)|when (is|are|do|does)|is there|are there)\b", re.I
+)
 
 # HR topics must never end up in the small-talk route.
 HR_TOPICS = re.compile(
@@ -99,7 +118,8 @@ REVIVE = re.compile(
 
 HELP_TEXT = (
     "I'm the HR Policy Assistant. I can answer questions about company HR policies, "
-    "check your leave balance, tell you the status of your requests, look up company holidays, "
+    "check your leave balance, take annual or sick leave requests, tell you the status of your requests, "
+    "look up company holidays, "
     "and point you to HR for sensitive matters. What would you like to know?"
 )
 
@@ -108,12 +128,15 @@ Do not answer it. If the message already makes sense on its own, return it uncha
 
 
 class Route(BaseModel):
-    route: Literal["sensitive", "balance", "status", "holiday", "policy", "other"]
+    route: Literal["sensitive", "balance", "status", "holiday", "leave_request", "policy", "other"]
     leave_type: Literal["annual", "sick", "both"] = "annual"
     detail: Literal["remaining", "used", "total"] = "remaining"
     request_id: int | None = None
     request_kind: Literal["leave", "hr", "any"] = "any"
     holiday_date: str | None = None
+    request_leave_type: Literal["annual", "sick", "unknown"] = "unknown"
+    leave_start: str | None = None
+    leave_end: str | None = None
 
 
 class AgentState(TypedDict, total=False):
@@ -126,6 +149,9 @@ class AgentState(TypedDict, total=False):
     request_id: int | None
     request_kind: str
     holiday_date: str | None
+    request_leave_type: str
+    leave_start: str | None
+    leave_end: str | None
     escalation_reason: str
     reply: str
     path: str
@@ -136,6 +162,11 @@ class AgentState(TypedDict, total=False):
 # ------------------------------------------------------------------ small helpers
 def _asks_own_balance(question: str) -> bool:
     return bool(OWN_HINTS.search(question) and LEAVE_HINTS.search(question))
+
+
+def _looks_like_leave_request(question: str) -> bool:
+    return bool(LEAVE_WORDS.search(question) and REQUEST_WORDS.search(question)
+                and not INFO_QUESTION.search(question))
 
 
 def _has_sensitive_word(question: str) -> bool:
@@ -186,11 +217,23 @@ def classify(state: AgentState) -> dict:
     if _has_sensitive_word(question):
         return {"route": "sensitive", "escalation_reason": "sensitive topic"}
 
-    prompt = ROUTER_PROMPT.replace("{today}", date.today().isoformat())
+    now = _local_today()
+    prompt = ROUTER_PROMPT.replace("{today}", f"{now.strftime('%A')} {now.isoformat()}")
     decision = get_llm().with_structured_output(Route).invoke([("system", prompt), ("human", question)])
 
+    leave_fields = {
+        "request_leave_type": getattr(decision, "request_leave_type", "unknown"),
+        "leave_start": getattr(decision, "leave_start", None),
+        "leave_end": getattr(decision, "leave_end", None),
+    }
     if decision.route == "sensitive":
+        if _looks_like_leave_request(question):  # "I am unwell and need sick leave" is a request, not a complaint
+            return {"route": "leave_request", **leave_fields}
         return {"route": "sensitive", "escalation_reason": "sensitive topic"}
+    if decision.route == "leave_request":
+        if not _looks_like_leave_request(question):
+            return {"route": "policy"}
+        return {"route": "leave_request", **leave_fields}
     if decision.route == "other":
         return {"route": "policy" if HR_TOPICS.search(question) else "other"}
     if decision.route == "balance":
@@ -299,6 +342,51 @@ def holiday_node(state: AgentState) -> dict:
     return {"reply": reply + "\nSource: Company holiday calendar", "path": "holiday"}
 
 
+def _fmt_day(d: date) -> str:
+    return f"{d.strftime('%A')} {_fmt_date(d)}"
+
+
+def _fmt_range(start: date, end: date) -> str:
+    return _fmt_day(start) if start == end else f"{_fmt_day(start)} to {_fmt_day(end)}"
+
+
+def _leave_blocked(errors: list) -> str:
+    return ("I cannot submit this request yet:\n" + "\n".join(f"• {e}" for e in errors) +
+            "\nYou can change the dates and ask again.")
+
+
+def leave_request_node(state: AgentState) -> dict:
+    """Step 1 of a leave request: understand it and check the rules. Nothing is saved yet."""
+    kind = state.get("request_leave_type") or "unknown"
+    start = _parse_date(state.get("leave_start"))
+    end = _parse_date(state.get("leave_end")) or start
+    if kind not in ("annual", "sick"):
+        return {"reply": "Is this annual leave or sick leave? Please tell me the type and the dates, "
+                         "for example: annual leave from 3 to 5 November.", "path": "leave_request_info"}
+    if start is None:
+        return {"reply": f"Which dates do you need {kind} leave for? For example: from 3 to 5 November.",
+                "path": "leave_request_info"}
+
+    check = tools.check_leave_request(state["employee_id"], kind, start, end)  # ID from the login
+    if not check["ok"]:
+        return {"reply": _leave_blocked(check["errors"]), "path": "leave_request_blocked"}
+
+    days = check["working_days"]
+    reply = (
+        f"{kind.capitalize()} leave, {_fmt_range(start, end)}, {days} working day{'s' if days != 1 else ''}. "
+        f"Your {kind} leave balance would go from {check['remaining_before']} to "
+        f"{check['remaining_after']} days."
+    )
+    if check["pending_days"]:
+        reply += " (Days in your pending requests are already counted.)"
+    for note in check["notes"]:
+        reply += f"\n{note}"
+    reply += "\nShall I submit it for HR approval? (yes or no)"
+    pending = {"type": "leave_confirm", "leave_type": kind,
+               "start": start.isoformat(), "end": end.isoformat()}
+    return {"reply": reply, "path": "leave_confirm", "pending": pending}
+
+
 def other_node(state: AgentState) -> dict:
     return {"reply": HELP_TEXT, "path": "other"}
 
@@ -400,6 +488,24 @@ def _draft_reply(employee_id: str, pending: dict) -> dict:
             "pending": new_pending}
 
 
+def _submit_leave(employee_id: str, pending: dict) -> dict:
+    """The employee said yes: save the request as pending and tell HR."""
+    kind = pending["leave_type"]
+    out = tools.submit_leave_request(
+        employee_id, kind, date.fromisoformat(pending["start"]), date.fromisoformat(pending["end"])
+    )
+    if not out["ok"]:
+        return {"reply": _leave_blocked(out["errors"]), "path": "leave_request_blocked",
+                "citations": [], "request_id": None, "pending": None}
+    reply = f"Done. Your {kind} leave request #{out['request_id']} is submitted and waiting for HR approval. "
+    reply += "HR has been notified." if out["email_sent"] else (
+        "I could not email HR, but HR will see it on the HR page.")
+    if kind == "sick":
+        reply += " I hope you feel better soon."
+    return {"reply": reply, "path": "leave_submitted", "citations": [],
+            "request_id": out["request_id"], "pending": None}
+
+
 def _handle_pending(employee_id: str, text: str, pending: dict):
     """Answer a yes or no to the last question. Returns None if the message is something else."""
     answer = _yes_no(text)
@@ -419,6 +525,12 @@ def _handle_pending(employee_id: str, text: str, pending: dict):
 
     if kind == "escalate_offer":
         return _declined(pending) if answer == "no" else _draft_reply(employee_id, pending)
+
+    if kind == "leave_confirm":
+        if answer == "no":
+            return {"reply": "Okay, I have not submitted anything.", "path": "leave_cancelled",
+                    "citations": [], "request_id": None, "pending": None}
+        return _submit_leave(employee_id, pending)
 
     if kind == "escalate_confirm":
         if answer == "no":
@@ -450,6 +562,7 @@ def _build_graph():
     g.add_node("balance", balance_node)
     g.add_node("status", status_node)
     g.add_node("holiday", holiday_node)
+    g.add_node("leave_request", leave_request_node)
     g.add_node("escalate", escalate_node)
     g.add_node("other", other_node)
 
@@ -462,6 +575,7 @@ def _build_graph():
             "balance": "balance",
             "status": "status",
             "holiday": "holiday",
+            "leave_request": "leave_request",
             "policy": "policy",
             "other": "other",
         },
@@ -471,7 +585,7 @@ def _build_graph():
         lambda s: "done" if s.get("path") == "policy" else "escalate",
         {"done": END, "escalate": "escalate"},
     )
-    for name in ("balance", "status", "holiday", "other", "escalate"):
+    for name in ("balance", "status", "holiday", "leave_request", "other", "escalate"):
         g.add_edge(name, END)
     return g.compile()
 
