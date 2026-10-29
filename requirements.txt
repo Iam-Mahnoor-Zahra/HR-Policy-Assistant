@@ -15,3 +15,5 @@ pytest
 # langchain-google-genai
 langchain-openai
 tzdata   #for the windows timezone support in the server
+google-api-python-client
+google-auth

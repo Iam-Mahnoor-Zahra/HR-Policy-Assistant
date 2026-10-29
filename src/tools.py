@@ -5,7 +5,7 @@ from datetime import date, datetime, timedelta
 
 from dotenv import load_dotenv
 
-from src import db, emailer
+from src import calendar_service, db, emailer
 
 load_dotenv()
 
@@ -54,10 +54,24 @@ def get_request_status(employee_id: str, request_id: int | None = None, kind: st
 
 # -------------------------------------------------------------------- holidays
 def get_holiday(day: date):
+    """The holiday on this day (a row with holiday_date and name), or None.
+    Read from Google Calendar; the Supabase table is the backup."""
+    if calendar_service.is_enabled():
+        try:
+            name = calendar_service.holidays_between(day, day).get(day)
+            return {"holiday_date": day.isoformat(), "name": name} if name else None
+        except Exception as e:
+            print(f"[warning] Google Calendar failed, using the holidays table: {e}")
     return db.fetch_holiday(day.isoformat())
 
 
 def list_holidays(from_day: date, limit: int = 5):
+    """The next holidays from a day. Google Calendar first, the Supabase table as backup."""
+    if calendar_service.is_enabled():
+        try:
+            return calendar_service.holiday_rows_from(from_day, limit)
+        except Exception as e:
+            print(f"[warning] Google Calendar failed, using the holidays table: {e}")
     return db.fetch_holidays(from_day.isoformat(), limit)
 
 
@@ -136,7 +150,12 @@ def today() -> date:
 
 
 def _holiday_dates(start: date, end: date) -> set:
-    """Company holidays between two dates. Day 3 can read these from Google Calendar instead."""
+    """Company holidays between two dates: Google Calendar first, the Supabase table as backup."""
+    if calendar_service.is_enabled():
+        try:
+            return set(calendar_service.holidays_between(start, end))
+        except Exception as e:
+            print(f"[warning] Google Calendar failed, using the holidays table: {e}")
     rows = db.fetch_holidays_between(start.isoformat(), end.isoformat())
     return {date.fromisoformat(str(r["holiday_date"])[:10]) for r in rows}
 
@@ -301,11 +320,23 @@ def decide_leave_request(request_id: int, approve: bool) -> dict:
         except Exception as e:
             print(f"[warning] could not update the used leave days: {e}")
             used_updated = False
-    # Day 3: create the Google Calendar event here when approve is True
 
     employee = db.fetch_employee(row["employee_id"]) or {}
     start = date.fromisoformat(str(row["start_date"])[:10])
     end = date.fromisoformat(str(row["end_date"])[:10])
+
+    # approved leave goes on the shared calendar; a calendar problem never undoes the approval
+    calendar_added = None  # None = calendar not set up
+    if approve and calendar_service.leave_calendar_enabled():
+        try:
+            calendar_service.add_leave_event(
+                employee.get("name", row["employee_id"]), row["employee_id"], row["leave_type"],
+                start, end, request_id,
+            )
+            calendar_added = True
+        except Exception as e:
+            print(f"[warning] could not add the leave to Google Calendar: {e}")
+            calendar_added = False
     email_sent = False
     if employee.get("email"):
         email_sent = emailer.email_employee(
@@ -322,5 +353,31 @@ def decide_leave_request(request_id: int, approve: bool) -> dict:
     )
     if not used_updated:
         message += " Warning: the leave balance was not updated, please check it."
+    if calendar_added is True:
+        message += " It was added to the leave calendar."
+    elif calendar_added is False:
+        message += " Warning: it could not be added to the leave calendar, please add it by hand."
     return {"ok": True, "status": status, "email_sent": email_sent, "used_updated": used_updated,
-            "message": message}
+            "calendar_added": calendar_added, "message": message}
+
+
+# ------------------------------------------------------- the HR page: escalations
+def hr_list_escalations(statuses: list, limit: int = 50, newest_first: bool = True) -> list:
+    """Escalations of all employees with the employee name added. For the HR page only."""
+    rows = db.fetch_escalations_by_status(statuses, limit, newest_first)
+    names = {}
+    for r in rows:
+        emp_id = r["employee_id"]
+        if emp_id not in names:
+            emp = db.fetch_employee(emp_id) or {}
+            names[emp_id] = emp.get("name", emp_id)
+        r["name"] = names[emp_id]
+    return rows
+
+
+def resolve_escalation(request_id: int) -> dict:
+    """HR marks an escalation as resolved. One that is already resolved is left alone."""
+    row = db.resolve_escalation(request_id)
+    if row is None:
+        return {"ok": False, "message": f"HR request #{request_id} was already resolved, or it does not exist."}
+    return {"ok": True, "message": f"HR request #{request_id} marked as resolved."}

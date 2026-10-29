@@ -207,6 +207,16 @@ def fmt_day(value) -> str:
     return f"{d.day} {d.strftime('%b %Y')}"  # no %-d, so it also works on Windows
 
 
+def resolve(request_id: int):
+    try:
+        result = tools.resolve_escalation(request_id)
+    except Exception as e:
+        print(f"[error] resolving failed: {e}")
+        result = {"ok": False, "message": "Something went wrong. Please check the request and try again."}
+    st.session_state.hr_notice = (result["ok"], result["message"])
+    st.rerun()
+
+
 def decide(request_id: int, approve: bool):
     try:
         result = tools.decide_leave_request(request_id, approve)
@@ -231,22 +241,23 @@ def watch_for_new_requests():
     and reloads the page only when they differ, so the screen does not flicker."""
     try:
         ids = tuple(r["id"] for r in tools.hr_list_leave_requests(["pending"]))
+        esc_ids = tuple(r["id"] for r in tools.hr_list_escalations(["open", "emailed"]))
     except Exception as e:
         print(f"[warning] could not check for new requests: {e}")
         return
-    if ids != st.session_state.get("hr_seen_ids"):
+    if ids != st.session_state.get("hr_seen_ids") or esc_ids != st.session_state.get("hr_seen_esc_ids"):
         st.rerun()
 
 
 def hr_screen():
     with st.sidebar:
         st.markdown("#### HR page")
-        st.caption("Leave approvals")
+        st.caption("Leave approvals and escalations")
         if wide_button("Log out", key="hr_logout"):
             st.session_state.clear()
             st.rerun()
 
-    st.title("Leave requests")
+    st.title("HR page")
     notice = st.session_state.pop("hr_notice", None)
     if notice:
         (st.success if notice[0] else st.warning)(notice[1])
@@ -259,7 +270,21 @@ def hr_screen():
         st.error("Could not load the requests. Please try again.")
         return
     st.session_state.hr_seen_ids = tuple(r["id"] for r in pending)
-    show_requests(pending, decided)
+
+    try:
+        open_esc = tools.hr_list_escalations(["open", "emailed"])
+        resolved_esc = tools.hr_list_escalations(["resolved"], limit=10)
+    except Exception as e:
+        print(f"[error] could not load escalations: {e}")
+        open_esc, resolved_esc = None, None
+    st.session_state.hr_seen_esc_ids = tuple(r["id"] for r in open_esc or [])
+
+    # the tab names stay the same, so the open tab is kept when the page reloads
+    tab_leave, tab_esc = st.tabs(["Leave requests", "Escalations"])
+    with tab_leave:
+        show_requests(pending, decided)
+    with tab_esc:
+        show_escalations(open_esc, resolved_esc)
     st.caption("New requests appear by themselves (checked every 30 seconds).")
     watch_for_new_requests()
 
@@ -289,6 +314,27 @@ def show_requests(pending: list, decided: list):
                 f"• #{r['id']} {r['name']}, {r['leave_type']} leave, {fmt_day(r['start_date'])} to "
                 f"{fmt_day(r['end_date'])}: **{r['status']}**"
             )
+
+
+def show_escalations(open_rows, resolved_rows):
+    if open_rows is None:
+        st.error("Could not load the escalations. Please try again.")
+        return
+    st.subheader(f"Open ({len(open_rows)})")
+    if not open_rows:
+        st.info("No open escalations.")
+    for r in open_rows:
+        with st.container(border=True, key=f"esc_{r['id']}"):
+            st.markdown(f"**HR request #{r['id']}: {html.escape(r['name'])} ({html.escape(r['employee_id'])})**")
+            st.caption(f"{fmt_day(r['created_at'])} | {r['reason']} | {r['status']}")
+            st.write(r.get("question") or "")
+            if st.button("Mark as resolved", key=f"resolve_{r['id']}", type="primary"):
+                resolve(r["id"])
+
+    if resolved_rows:
+        st.subheader("Recently resolved")
+        for r in resolved_rows:
+            st.markdown(f"• #{r['id']} {r['name']}, {r['reason']}: **resolved**")
 
 
 # ----------------------------------------------------------------- chat screen

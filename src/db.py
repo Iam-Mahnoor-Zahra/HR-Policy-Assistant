@@ -180,3 +180,24 @@ def fetch_chats(employee_id: str, limit: int = 30):
         .execute()
     )
     return res.data
+
+
+def fetch_escalations_by_status(statuses: list, limit: int = 50, newest_first: bool = True):
+    """Escalations of ALL employees. Only the HR page may call this (never the employee chat)."""
+    q = _table("escalations").select("*").in_("status", statuses)
+    return q.order("created_at", desc=newest_first).limit(limit).execute().data
+
+
+def resolve_escalation(request_id: int):
+    """Set resolved, but only if it is not resolved yet. Returns the row, or None if nothing changed."""
+    res = (
+        _table("escalations").update({"status": "resolved"})
+        .eq("id", request_id).neq("status", "resolved")
+        .execute()
+    )
+    return res.data[0] if res.data else None
+
+
+def fetch_employee_emails():
+    """Name and email of every employee. Only for the calendar sharing script, never the employee chat."""
+    return _table("employees").select("employee_id, name, email").execute().data
