@@ -10,14 +10,15 @@ from src.agent import Route, run_agent
 class FakeLLM:
     """with_structured_output(...).invoke() returns the planned Route; plain invoke() returns text."""
 
-    def __init__(self, route=None):
+    def __init__(self, route=None, rewrite=""):
         self.route = route
+        self.rewrite = rewrite  # what the follow-up rewrite step would answer
 
     def with_structured_output(self, schema):
         return SimpleNamespace(invoke=lambda messages: self.route)
 
     def invoke(self, messages):
-        return SimpleNamespace(content="")
+        return SimpleNamespace(content=self.rewrite)
 
 
 @pytest.fixture
@@ -25,8 +26,8 @@ def ask(monkeypatch, world):
     monkeypatch.setattr(agent, "answer_policy_question",
                         lambda q: {"found": True, "answer": "A rule.", "citations": [], "reason": ""})
 
-    def _ask(employee_id, text, route=None, pending=None, history=None):
-        monkeypatch.setattr(agent, "get_llm", lambda: FakeLLM(route))
+    def _ask(employee_id, text, route=None, pending=None, history=None, rewrite=""):
+        monkeypatch.setattr(agent, "get_llm", lambda: FakeLLM(route, rewrite))
         return run_agent(employee_id, text, history=history, pending=pending)
 
     return _ask
@@ -125,3 +126,50 @@ def test_the_confirm_step_rechecks_the_rules(ask, world):
     world.add_request("EMP003", "annual", "2026-11-04", "2026-11-04", 1)  # appears before the yes
     r = ask("EMP003", "yes", pending=first["pending"])
     assert r["path"] == "leave_request_blocked" and "overlaps" in r["reply"] and len(world.requests) == 1
+
+
+# ---- the model sometimes calls a plain request "policy" (seen with "i want to request for sick leave?")
+def test_plain_sick_leave_request_asks_for_dates_even_if_the_model_says_policy(ask):
+    r = ask("EMP001", "i want to request for sick leave?", Route(route="policy"))
+    assert r["path"] == "leave_request_info" and "Which dates do you need sick leave" in r["reply"]
+
+
+def test_plain_annual_leave_request_asks_for_dates(ask):
+    r = ask("EMP001", "i want to request for annual leave?", Route(route="other"))
+    assert r["path"] == "leave_request_info" and "annual leave" in r["reply"]
+
+
+def test_a_question_about_the_rules_stays_a_policy_question(ask):
+    for text in ("I need to know how many sick leave days I get", "I want to understand the leave policy"):
+        assert ask("EMP001", text, Route(route="policy"))["path"] == "policy"
+
+
+
+# ---- the real-life failure: the same sentence worked on an empty chat but not after earlier messages
+HISTORY = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "Hello! How can I help?"}]
+
+
+def test_a_complete_request_is_not_rewritten_into_a_rules_question(ask):
+    r = ask("EMP001", "i want to apply for sick leave", Route(route="policy"), history=HISTORY,
+            rewrite="How do I apply for sick leave?")
+    assert r["path"] == "leave_request_info" and "Which dates do you need sick leave" in r["reply"]
+
+
+def test_other_wordings_of_a_leave_request(ask):
+    for text, kind in (("can i apply for sick leave?", "sick"), ("i want sick leave?", "sick"),
+                       ("want to apply for annual leave", "annual"), ("I would like to book annual leave", "annual")):
+        r = ask("EMP001", text, Route(route="policy"), history=HISTORY, rewrite="What is the leave policy?")
+        assert r["path"] == "leave_request_info" and f"{kind} leave" in r["reply"], text
+
+
+def test_rules_questions_about_leave_stay_policy_questions(ask):
+    for text in ("can I take sick leave without a certificate?", "Can I carry forward leave?",
+                 "How many sick leave days do I get?", "What is the notice for annual leave?"):
+        assert ask("EMP001", text, Route(route="policy"), history=HISTORY)["path"] == "policy", text
+
+
+def test_answering_with_dates_after_the_question_still_uses_the_chat(ask):
+    history = HISTORY + [{"role": "user", "content": "i want annual leave"},
+                         {"role": "assistant", "content": "Which dates do you need annual leave for?"}]
+    r = ask("EMP003", "3 to 5 November", ANNUAL, history=history, rewrite="I want annual leave from 3 to 5 November")
+    assert r["path"] == "leave_confirm"

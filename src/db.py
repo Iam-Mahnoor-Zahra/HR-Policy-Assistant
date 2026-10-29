@@ -152,3 +152,31 @@ def add_leave_used(employee_id: str, leave_type: str, days: int):
     column = f"{leave_type}_used"
     row = fetch_employee(employee_id)
     _table("employees").update({column: row[column] + days}).eq("employee_id", employee_id).execute()
+
+
+# --------------------------------------------------------------- saved chat history
+def insert_chat(employee_id: str, title: str, messages: list):
+    """Save a new chat for one employee and return its ID."""
+    row = {"employee_id": employee_id, "title": title, "messages": messages}
+    return _table("chat_sessions").insert(row).execute().data[0]["id"]
+
+
+def update_chat(chat_id: int, employee_id: str, title: str, messages: list):
+    """Update a chat. The employee ID is part of the filter, so nobody can overwrite another's chat."""
+    (
+        _table("chat_sessions")
+        .update({"title": title, "messages": messages, "updated_at": datetime.now(timezone.utc).isoformat()})
+        .eq("id", chat_id).eq("employee_id", employee_id)
+        .execute()
+    )
+
+
+def fetch_chats(employee_id: str, limit: int = 30):
+    """The employee's OWN saved chats, most recently used first."""
+    res = (
+        _table("chat_sessions").select("id, title, messages")
+        .eq("employee_id", employee_id)
+        .order("updated_at", desc=True).limit(limit)
+        .execute()
+    )
+    return res.data

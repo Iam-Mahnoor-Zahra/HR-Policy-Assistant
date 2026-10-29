@@ -80,3 +80,48 @@ def world(monkeypatch):
     monkeypatch.setattr(emailer, "email_employee",
                         lambda address, subject, body: w.employee_mails.append((address, subject, body)) or True)
     return w
+
+
+@pytest.fixture(autouse=True)
+def no_real_chat_storage(monkeypatch):
+    """Tests never touch the real chat table. Tests that need storage use the `chat_store` fixture."""
+    from src import db
+
+    monkeypatch.setattr(db, "fetch_chats", lambda employee_id, limit=30: [])
+    monkeypatch.setattr(db, "insert_chat", lambda employee_id, title, messages: 1)
+    monkeypatch.setattr(db, "update_chat", lambda chat_id, employee_id, title, messages: None)
+
+
+class ChatStore:
+    def __init__(self):
+        self.rows = []  # {"id", "employee_id", "title", "messages"}
+        self.fail = False
+
+    def fetch(self, employee_id, limit=30):
+        if self.fail:
+            raise RuntimeError("database down")
+        return [dict(r) for r in reversed(self.rows) if r["employee_id"] == employee_id][:limit]
+
+    def insert(self, employee_id, title, messages):
+        if self.fail:
+            raise RuntimeError("database down")
+        row = {"id": len(self.rows) + 1, "employee_id": employee_id, "title": title,
+               "messages": [dict(m) for m in messages]}
+        self.rows.append(row)
+        return row["id"]
+
+    def update(self, chat_id, employee_id, title, messages):
+        for r in self.rows:
+            if r["id"] == chat_id and r["employee_id"] == employee_id:
+                r["title"], r["messages"] = title, [dict(m) for m in messages]
+
+
+@pytest.fixture
+def chat_store(monkeypatch):
+    from src import db
+
+    store = ChatStore()
+    monkeypatch.setattr(db, "fetch_chats", store.fetch)
+    monkeypatch.setattr(db, "insert_chat", store.insert)
+    monkeypatch.setattr(db, "update_chat", store.update)
+    return store

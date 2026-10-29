@@ -89,6 +89,13 @@ INFO_QUESTION = re.compile(
     r"^\s*(how (many|much|long|do|does)|what (is|are|happens)|when (is|are|do|does)|is there|are there)\b", re.I
 )
 
+# Plain "I want / I need ... leave" sentences are leave requests even if the model says "policy".
+STRONG_REQUEST = re.compile(r"\b(i want|i need|i'd like|i would like|i wish)\b[^?.]{0,30}\b(leave|days? off|day off)\b", re.I)
+NOT_A_REQUEST = re.compile(
+    r"\b(know|ask|understand|find out|check|learn|policy|policies|rules?|balance|entitle\w*|carry|"
+    r"without|certificate|allowed|eligible|notice|paid|unpaid|cash)\b", re.I
+)
+
 # HR topics must never end up in the small-talk route.
 HR_TOPICS = re.compile(
     r"\b(salary|salaries|pay|payslip|bonus|insurance|benefit|benefits|contract|resign|resignation|"
@@ -169,6 +176,26 @@ def _looks_like_leave_request(question: str) -> bool:
                 and not INFO_QUESTION.search(question))
 
 
+def _is_leave_request_text(text: str) -> bool:
+    """A message that clearly asks to take leave ("I want to apply for sick leave", "can I apply for
+    annual leave"). Decided by plain rules on the employee's own words, because a small model
+    sometimes calls these "policy" questions."""
+    return bool((STRONG_REQUEST.search(text) or _looks_like_leave_request(text))
+                and not NOT_A_REQUEST.search(text))
+
+
+def _infer_leave_type(question: str, model_value: str) -> str:
+    """If the model is unsure, read the type from the words: sick or annual."""
+    if model_value in ("annual", "sick"):
+        return model_value
+    q = question.lower()
+    if "sick" in q and "annual" not in q:
+        return "sick"
+    if ("annual" in q or "vacation" in q) and "sick" not in q:
+        return "annual"
+    return "unknown"
+
+
 def _has_sensitive_word(question: str) -> bool:
     return any(word in question.lower() for word in SENSITIVE_WORDS)
 
@@ -194,6 +221,8 @@ def _standalone_question(question: str, history: list | None) -> str:
     if not history:
         return question
     if GREETING.fullmatch(question.strip()) or _has_sensitive_word(question):
+        return question
+    if _is_leave_request_text(question):  # already complete: rewriting it could turn it into a rules question
         return question
     if len(question.split()) > 8:
         return question
@@ -222,7 +251,7 @@ def classify(state: AgentState) -> dict:
     decision = get_llm().with_structured_output(Route).invoke([("system", prompt), ("human", question)])
 
     leave_fields = {
-        "request_leave_type": getattr(decision, "request_leave_type", "unknown"),
+        "request_leave_type": _infer_leave_type(question, getattr(decision, "request_leave_type", "unknown")),
         "leave_start": getattr(decision, "leave_start", None),
         "leave_end": getattr(decision, "leave_end", None),
     }
@@ -233,6 +262,10 @@ def classify(state: AgentState) -> dict:
     if decision.route == "leave_request":
         if not _looks_like_leave_request(question):
             return {"route": "policy"}
+        return {"route": "leave_request", **leave_fields}
+    original = state.get("original_question") or question
+    if decision.route in ("policy", "other") and (
+            _is_leave_request_text(original) or _is_leave_request_text(question)):
         return {"route": "leave_request", **leave_fields}
     if decision.route == "other":
         return {"route": "policy" if HR_TOPICS.search(question) else "other"}

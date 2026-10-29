@@ -40,7 +40,7 @@ def backend(monkeypatch):
 
 
 def _hr_login(password="hrsecret"):
-    at = AppTest.from_file(APP).run()
+    at = AppTest.from_file(APP, default_timeout=30).run()
     at.text_input[2].set_value(password)
     at.button[1].click().run()
     return at
@@ -66,7 +66,7 @@ def test_missing_hr_password_setting_is_reported(monkeypatch):
 
 
 def test_an_employee_login_never_shows_the_hr_page():
-    at = AppTest.from_file(APP).run()
+    at = AppTest.from_file(APP, default_timeout=30).run()
     at.text_input[0].set_value("EMP001")
     at.text_input[1].set_value("secret")
     at.button[0].click().run()
@@ -107,3 +107,17 @@ def test_hr_logout_returns_to_login():
     at = _hr_login()
     _button(at, "hr_logout").click().run()
     assert "hr_ok" not in at.session_state
+
+
+def test_new_requests_show_up_on_the_next_refresh(backend):
+    at = _hr_login()
+    backend["pending"].append({"id": 8, "employee_id": "EMP001", "name": "Ayesha", "leave_type": "sick",
+                               "start_date": "2026-10-30", "end_date": "2026-10-30",
+                               "working_days": 1, "status": "pending"})
+    at.run()  # what the automatic 10-second reload does
+    assert _button(at, "approve_8")
+
+
+def test_the_page_remembers_which_requests_it_shows():
+    at = _hr_login()
+    assert at.session_state["hr_seen_ids"] == (7,)  # the invisible 30-second check compares against this

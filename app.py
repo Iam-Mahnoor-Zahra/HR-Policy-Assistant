@@ -108,7 +108,7 @@ def wide_button(label, **kwargs):
 def new_chat():
     chat_id = st.session_state.next_id
     st.session_state.next_id += 1
-    st.session_state.chats[chat_id] = {"title": "New chat", "messages": [], "pending": None}
+    st.session_state.chats[chat_id] = {"title": "New chat", "messages": [], "pending": None, "db_id": None}
     st.session_state.order.insert(0, chat_id)
     st.session_state.current = chat_id
 
@@ -118,7 +118,30 @@ def start_session(employee: dict):
     st.session_state.chats = {}
     st.session_state.order = []
     st.session_state.next_id = 1
+    try:
+        saved = db.fetch_chats(employee["employee_id"])  # this employee's own chats, newest first
+    except Exception as e:
+        print(f"[warning] could not load the saved chats: {e}")
+        saved = []
+    for row in reversed(saved):  # oldest first, so the newest ends up at the top of the list
+        chat_id = st.session_state.next_id
+        st.session_state.next_id += 1
+        # a yes/no step that was open when the employee left is not brought back
+        st.session_state.chats[chat_id] = {"title": row["title"], "messages": row["messages"] or [],
+                                           "pending": None, "db_id": row["id"]}
+        st.session_state.order.insert(0, chat_id)
     new_chat()
+
+
+def save_chat(employee_id: str, chat: dict):
+    """Keep the chat in the database so it is still there after logout. A failure never breaks the chat."""
+    try:
+        if chat.get("db_id"):
+            db.update_chat(chat["db_id"], employee_id, chat["title"], chat["messages"])
+        else:
+            chat["db_id"] = db.insert_chat(employee_id, chat["title"], chat["messages"])
+    except Exception as e:
+        print(f"[warning] could not save the chat: {e}")
 
 
 def short(text: str, limit: int = 30) -> str:
@@ -194,6 +217,27 @@ def decide(request_id: int, approve: bool):
     st.rerun()
 
 
+try:
+    check_every_30s = st.fragment(run_every="30s")
+except (AttributeError, TypeError):  # very old Streamlit: no automatic check
+
+    def check_every_30s(func):
+        return func
+
+
+@check_every_30s
+def watch_for_new_requests():
+    """Draws nothing. Every 30 seconds it compares the pending request IDs with what the page shows,
+    and reloads the page only when they differ, so the screen does not flicker."""
+    try:
+        ids = tuple(r["id"] for r in tools.hr_list_leave_requests(["pending"]))
+    except Exception as e:
+        print(f"[warning] could not check for new requests: {e}")
+        return
+    if ids != st.session_state.get("hr_seen_ids"):
+        st.rerun()
+
+
 def hr_screen():
     with st.sidebar:
         st.markdown("#### HR page")
@@ -214,7 +258,13 @@ def hr_screen():
         print(f"[error] could not load requests: {e}")
         st.error("Could not load the requests. Please try again.")
         return
+    st.session_state.hr_seen_ids = tuple(r["id"] for r in pending)
+    show_requests(pending, decided)
+    st.caption("New requests appear by themselves (checked every 30 seconds).")
+    watch_for_new_requests()
 
+
+def show_requests(pending: list, decided: list):
     st.subheader(f"Waiting for a decision ({len(pending)})")
     if not pending:
         st.info("No pending requests.")
@@ -362,6 +412,7 @@ def chat_screen():
             }
     show_message(chat_id, len(messages), reply)
     messages.append(reply)
+    save_chat(employee["id"], chat)
     st.rerun()
 
 
