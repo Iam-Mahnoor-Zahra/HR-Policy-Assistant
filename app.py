@@ -39,44 +39,111 @@ EXAMPLES = [
     "What is the daily meal limit on a business trip?",
 ]
 
-st.set_page_config(page_title="HR Policy Assistant", page_icon="💬", layout="wide")
+st.set_page_config(page_title="HR Policy Assistant", page_icon="🤖", layout="wide")
 
 # Layout styling. Colors come from the theme (light or dark), so both modes work.
 STYLE = """
 <style>
-/* chat bubbles: employee on the right, assistant on the left (colors follow light or dark mode) */
+:root { --line: color-mix(in srgb, currentColor 14%, transparent); --soft: color-mix(in srgb, currentColor 6%, transparent); }
+
+/* ---------- page and buttons (colors follow the light or dark theme) ---------- */
+.block-container { padding-top: 2rem; padding-bottom: 5rem; max-width: 1100px; }
+h1, h2, h3, h4 { letter-spacing: -0.01em; }
+[data-testid="stButton"] button, [data-testid="stDownloadButton"] button, [data-testid="stFormSubmitButton"] button {
+    border-radius: 10px; min-height: 2.5rem; font-weight: 500; transition: border-color .15s, background .15s, transform .05s;
+}
+[data-testid="stButton"] button:hover, [data-testid="stDownloadButton"] button:hover,
+[data-testid="stFormSubmitButton"] button:hover { border-color: #6366F1; }
+[data-testid="stButton"] button:active { transform: scale(0.98); }
+[data-testid="stTextInput"] input { border-radius: 10px; }
+[data-testid="stTabs"] [role="tab"] { padding: 0.5rem 1rem; }
+
+/* ---------- chat bubbles: employee on the right, assistant on the left with a bot avatar ---------- */
 [class*="st-key-msg_user_"] > [data-testid="stElementContainer"]:has(> [data-testid="stMarkdown"]) {
     width: fit-content; max-width: 75%; margin-left: auto;
 }
 [class*="st-key-msg_bot_"] > [data-testid="stElementContainer"]:has(> [data-testid="stMarkdown"]) {
-    width: fit-content; max-width: 80%;
+    width: fit-content; max-width: 85%;
 }
 [class*="st-key-msg_user_"] [data-testid="stMarkdown"] {
-    background: rgba(99, 102, 241, 0.2); border-radius: 18px 18px 4px 18px; padding: 0.6rem 1rem;
+    background: rgba(99, 102, 241, 0.22); border-radius: 18px 18px 4px 18px; padding: 0.65rem 1rem;
 }
 [class*="st-key-msg_bot_"] [data-testid="stMarkdown"] {
-    background: color-mix(in srgb, currentColor 8%, transparent);
-    border-radius: 18px 18px 18px 4px; padding: 0.6rem 1rem;
+    background: var(--soft); border: 1px solid var(--line);
+    border-radius: 18px 18px 18px 4px; padding: 0.65rem 1rem;
+}
+[class*="st-key-msg_bot_"] { position: relative; padding-left: 46px; }
+[class*="st-key-msg_bot_"]::before {
+    content: "🤖"; position: absolute; left: 0; top: 2px; width: 34px; height: 34px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; font-size: 18px;
+    background: rgba(99, 102, 241, 0.16); border: 1px solid var(--line);
 }
 [class*="st-key-msg_user_"] [data-testid="stMarkdown"] p,
-[class*="st-key-msg_bot_"] [data-testid="stMarkdown"] p { margin-bottom: 0; }
+[class*="st-key-msg_bot_"] [data-testid="stMarkdown"] p { margin-bottom: 0; line-height: 1.55; }
 [class*="st-key-msg_user_"] [data-testid="stMarkdownContainer"],
 [class*="st-key-msg_bot_"] [data-testid="stMarkdownContainer"] { margin-bottom: 0 !important; }
-/* sidebar: chats at the top, user card pinned to the bottom */
+/* lists, code and long words inside messages */
+[class*="st-key-msg_"] [data-testid="stMarkdown"] { overflow-wrap: anywhere; }
+[class*="st-key-msg_"] ul, [class*="st-key-msg_"] ol { margin: 0.35rem 0 0.35rem 0.2rem; padding-left: 1.2rem; }
+[class*="st-key-msg_"] li { margin: 0.15rem 0; }
+[class*="st-key-msg_"] pre { border-radius: 10px; overflow-x: auto; border: 1px solid var(--line); }
+[class*="st-key-msg_"] code { font-size: 0.85em; border-radius: 6px; }
+/* source citations */
+[class*="st-key-msg_bot_"] [data-testid="stExpander"] { border: 1px solid var(--line); border-radius: 12px; margin-top: 0.4rem; }
+[class*="st-key-msg_bot_"] [data-testid="stDownloadButton"] button { min-height: 2.1rem; font-size: 0.85rem; margin-top: 0.4rem; }
+
+/* ---------- sidebar: header on top, scrollable chats in the middle, user card pinned to the bottom ---------- */
+[data-testid="stSidebar"] { border-right: 1px solid var(--line); }
 [data-testid="stSidebarContent"] { display: flex; flex-direction: column; height: 100%; }
 [data-testid="stSidebarUserContent"] { flex: 1 1 auto; display: flex; flex-direction: column; }
 [data-testid="stSidebarUserContent"] > div { flex: 1 1 auto; display: flex; flex-direction: column; }
 [data-testid="stSidebarUserContent"] > div > [data-testid="stVerticalBlock"] { flex: 1 1 auto; }
 [data-testid="stLayoutWrapper"]:has(> [class*="st-key-side_bottom"]) { margin-top: auto; }
-/* user card */
-.user-card { display: flex; align-items: center; gap: 0.7rem; padding: 0.4rem 0; }
+.st-key-side_history, .st-key-side_history > [data-testid="stVerticalBlock"] {
+    height: 360px !important; height: calc(100dvh - 400px) !important; min-height: 150px;
+}
+.st-key-side_history [data-testid="stVerticalBlock"] { gap: 0.15rem; }
+.st-key-side_history [data-testid="stButton"] button {
+    min-height: 2.1rem; padding: 0.2rem 0.6rem; font-size: 0.9rem; justify-content: flex-start; text-align: left;
+}
+.st-key-side_history [data-testid="stButton"] button p { text-align: left; }
+.user-card { display: flex; align-items: center; gap: 0.7rem; padding: 0.3rem 0; }
 .avatar { width: 38px; height: 38px; border-radius: 50%; display: flex; align-items: center;
-    justify-content: center; font-weight: 700; color: #fff; background: #4F46E5; }
+    justify-content: center; font-weight: 700; color: #fff; background: #4F46E5; flex: 0 0 auto; }
 .uname { font-weight: 600; line-height: 1.2; }
 .uid { font-size: 0.8rem; opacity: 0.65; }
-.welcome { text-align: center; margin: 12vh 0 1.5rem 0; }
+
+/* ---------- welcome and login ---------- */
+.welcome { text-align: center; margin: 10vh 0 1.5rem 0; }
 .welcome h2 { margin-bottom: 0.2rem; }
 .welcome p { opacity: 0.7; }
+.bot-badge { font-size: 2.6rem; line-height: 1; margin-bottom: 0.5rem; }
+
+/* ---------- HR page ---------- */
+.st-key-hr_header [data-testid="stHorizontalBlock"] { align-items: center; }
+.st-key-hr_header h1 { padding: 0; }
+[data-testid="stVerticalBlockBorderWrapper"] { border-radius: 14px; }
+[class*="st-key-req_"] [data-testid="stHorizontalBlock"] { max-width: 360px; }
+
+/* ---------- phones ---------- */
+@media (max-width: 640px) {
+    .block-container { padding: 1rem 0.8rem 5rem; }
+    .welcome { margin: 4vh 0 1rem 0; }
+    [data-testid="stButton"] button, [data-testid="stDownloadButton"] button,
+    [data-testid="stFormSubmitButton"] button { min-height: 2.75rem; }
+    [class*="st-key-msg_user_"] > [data-testid="stElementContainer"]:has(> [data-testid="stMarkdown"]) { max-width: 92%; }
+    [class*="st-key-msg_bot_"] > [data-testid="stElementContainer"]:has(> [data-testid="stMarkdown"]) { max-width: 100%; }
+    [class*="st-key-msg_bot_"] { padding-left: 40px; }
+    [class*="st-key-msg_bot_"]::before { width: 30px; height: 30px; font-size: 16px; }
+    /* Approve / Reject and the HR header stay on one row instead of stacking */
+    [class*="st-key-req_"] [data-testid="stHorizontalBlock"], .st-key-hr_header [data-testid="stHorizontalBlock"] {
+        flex-wrap: nowrap !important; max-width: 100%;
+    }
+    [class*="st-key-req_"] [data-testid="stColumn"] { min-width: 0 !important; flex: 1 1 0 !important; width: auto !important; }
+    .st-key-hr_header [data-testid="stColumn"]:first-child { min-width: 0 !important; flex: 1 1 auto !important; width: auto !important; }
+    .st-key-hr_header [data-testid="stColumn"]:last-child { flex: 0 0 auto !important; width: auto !important; min-width: 96px !important; }
+    .st-key-hr_header h1 { font-size: 1.7rem; }
+}
 </style>
 """
 
@@ -159,7 +226,7 @@ def login_screen():
     _, middle, _ = st.columns([1, 1.4, 1])
     with middle:
         st.markdown(
-            "<div class='welcome' style='margin-top:10vh'><h2>HR Policy Assistant</h2>"
+            "<div class='welcome' style='margin-top:8vh'><div class='bot-badge'>🤖</div><h2>HR Policy Assistant</h2>"
             "<p>Sign in to ask about HR policies, check your leave balance, "
             "or get pointed to HR.</p></div>",
             unsafe_allow_html=True,
@@ -251,13 +318,17 @@ def watch_for_new_requests():
 
 def hr_screen():
     with st.sidebar:
-        st.markdown("#### HR page")
+        st.markdown("#### 🤖 HR Policy Assistant")
         st.caption("Leave approvals and escalations")
-        if wide_button("Log out", key="hr_logout"):
-            st.session_state.clear()
-            st.rerun()
 
-    st.title("HR page")
+    with st.container(key="hr_header"):
+        title_col, logout_col = st.columns([5, 1])
+        with title_col:
+            st.title("HR page")
+        with logout_col:
+            if wide_button("Log out", key="hr_logout"):
+                st.session_state.clear()
+                st.rerun()
     notice = st.session_state.pop("hr_notice", None)
     if notice:
         (st.success if notice[0] else st.warning)(notice[1])
@@ -301,7 +372,7 @@ def show_requests(pending: list, decided: list):
                 f"{r['leave_type'].capitalize()} leave, {fmt_day(r['start_date'])} to "
                 f"{fmt_day(r['end_date'])}, {days} working day{'s' if days != 1 else ''}"
             )
-            approve_col, reject_col, _ = st.columns([1, 1, 4])
+            approve_col, reject_col = st.columns(2)
             if approve_col.button("Approve", key=f"approve_{r['id']}", type="primary"):
                 decide(r["id"], True)
             if reject_col.button("Reject", key=f"reject_{r['id']}"):
@@ -309,11 +380,14 @@ def show_requests(pending: list, decided: list):
 
     if decided:
         st.subheader("Recent decisions")
-        for r in decided:
-            st.markdown(
-                f"• #{r['id']} {r['name']}, {r['leave_type']} leave, {fmt_day(r['start_date'])} to "
-                f"{fmt_day(r['end_date'])}: **{r['status']}**"
-            )
+        with st.container(height=250, border=True, key="recent_decisions"):
+            for r in decided:
+                icon = "✅" if r["status"] == "approved" else "❌"
+                with st.container(border=True):
+                    st.markdown(
+                        f"{icon} #{r['id']} {r['name']}, {r['leave_type']} leave, {fmt_day(r['start_date'])} to "
+                        f"{fmt_day(r['end_date'])}: **{r['status']}**"
+                    )
 
 
 def show_escalations(open_rows, resolved_rows):
@@ -333,8 +407,10 @@ def show_escalations(open_rows, resolved_rows):
 
     if resolved_rows:
         st.subheader("Recently resolved")
-        for r in resolved_rows:
-            st.markdown(f"• #{r['id']} {r['name']}, {r['reason']}: **resolved**")
+        with st.container(height=300, border=True, key="recent_resolved"):
+            for r in resolved_rows:
+                with st.container(border=True):
+                    st.markdown(f"✅ #{r['id']} {r['name']}, {r['reason']}: **resolved**")
 
 
 # ----------------------------------------------------------------- chat screen
@@ -368,16 +444,21 @@ def sidebar():
     employee = st.session_state.employee
     with st.sidebar:
         with st.container(key="side_top"):
-            st.markdown("#### HR Policy Assistant")
+            st.markdown("#### 🤖 HR Policy Assistant")
             if wide_button("＋ New chat", key="new_chat", type="primary"):
                 if st.session_state.chats[st.session_state.current]["messages"]:
                     new_chat()
                 st.rerun()
             st.caption("Previous chats")
+
+        # only this list scrolls: the header above and the user card below stay in place
+        with st.container(height=360, border=False, key="side_history"):
+            shown = 0
             for chat_id in st.session_state.order:
                 chat = st.session_state.chats[chat_id]
                 if not chat["messages"]:
                     continue
+                shown += 1
                 active = chat_id == st.session_state.current
                 if wide_button(
                     short(chat["title"]),
@@ -386,6 +467,8 @@ def sidebar():
                 ):
                     st.session_state.current = chat_id
                     st.rerun()
+            if not shown:
+                st.caption("No chats yet.")
 
         with st.container(key="side_bottom"):
             st.divider()
@@ -412,7 +495,7 @@ def chat_screen():
     clicked = None
     if not messages:
         st.markdown(
-            f"<div class='welcome'><h2>Hello, {html.escape(employee['name'])}</h2>"
+            f"<div class='welcome'><div class='bot-badge'>🤖</div><h2>Hello, {html.escape(employee['name'])}</h2>"
             "<p>Ask about HR policies or your leave. Answers show their source.</p></div>",
             unsafe_allow_html=True,
         )
