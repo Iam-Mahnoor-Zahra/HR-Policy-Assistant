@@ -2,6 +2,7 @@
 
 Run from the project root:   streamlit run app.py
 """
+import base64
 import hmac
 import html
 import os
@@ -34,12 +35,37 @@ from src.agent import run_agent  # noqa: E402
 MAX_CHARS = int(os.getenv("MAX_QUESTION_CHARS", "500"))
 HR_EMAIL = os.getenv("HR_EMAIL", "hr@examplecorp.com")
 EXAMPLES = [
-    "How many leave days can I carry forward?",
+    "I want to apply for annual leave?",
     "How many annual leave days do I have left?",
     "What is the daily meal limit on a business trip?",
 ]
 
-st.set_page_config(page_title="HR Policy Assistant", page_icon="🤖", layout="wide")
+# The assistant's icon: an indigo circle with a white sparkle (drawn as SVG, so there is no emoji).
+BOT_SVG = (
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'>"
+    "<circle cx='24' cy='24' r='24' fill='#4F46E5'/>"
+    "<polygon fill='#fff' points='22,12 24.2,23.8 36,26 24.2,28.2 22,40 19.8,28.2 8,26 19.8,23.8'/>"
+    "<polygon fill='#fff' points='35.5,7.2 36.4,12.1 41.3,13 36.4,13.9 35.5,18.8 34.6,13.9 29.7,13 34.6,12.1'/>"
+    "</svg>"
+)
+BOT_URI = "data:image/svg+xml;base64," + base64.b64encode(BOT_SVG.encode()).decode()
+
+
+def bot_icon(size: int = 28) -> str:
+    return f"<img src='{BOT_URI}' width='{size}' height='{size}' alt='' style='display:block'>"
+
+
+def page_icon():
+    """The browser-tab icon from assets/icon.png. If the file is missing, the default icon is used."""
+    try:
+        from PIL import Image
+
+        return Image.open(Path(__file__).resolve().parent / "assets" / "icon.png")
+    except Exception:
+        return None
+
+
+st.set_page_config(page_title="HR Policy Assistant", page_icon=page_icon(), layout="wide")
 
 # Layout styling. Colors come from the theme (light or dark), so both modes work.
 STYLE = """
@@ -47,7 +73,8 @@ STYLE = """
 :root { --line: color-mix(in srgb, currentColor 14%, transparent); --soft: color-mix(in srgb, currentColor 6%, transparent); }
 
 /* ---------- page and buttons (colors follow the light or dark theme) ---------- */
-.block-container { padding-top: 2rem; padding-bottom: 5rem; max-width: 1100px; }
+/* 4.5rem keeps the page title clear of Streamlit's top bar */
+.block-container { padding-top: 4.5rem; padding-bottom: 5rem; max-width: 1100px; }
 h1, h2, h3, h4 { letter-spacing: -0.01em; }
 [data-testid="stButton"] button, [data-testid="stDownloadButton"] button, [data-testid="stFormSubmitButton"] button {
     border-radius: 10px; min-height: 2.5rem; font-weight: 500; transition: border-color .15s, background .15s, transform .05s;
@@ -74,9 +101,8 @@ h1, h2, h3, h4 { letter-spacing: -0.01em; }
 }
 [class*="st-key-msg_bot_"] { position: relative; padding-left: 46px; }
 [class*="st-key-msg_bot_"]::before {
-    content: "🤖"; position: absolute; left: 0; top: 2px; width: 34px; height: 34px; border-radius: 50%;
-    display: flex; align-items: center; justify-content: center; font-size: 18px;
-    background: rgba(99, 102, 241, 0.16); border: 1px solid var(--line);
+    content: ""; position: absolute; left: 0; top: 2px; width: 34px; height: 34px; border-radius: 50%;
+    background: url("__BOT__") center / cover no-repeat;
 }
 [class*="st-key-msg_user_"] [data-testid="stMarkdown"] p,
 [class*="st-key-msg_bot_"] [data-testid="stMarkdown"] p { margin-bottom: 0; line-height: 1.55; }
@@ -92,49 +118,94 @@ h1, h2, h3, h4 { letter-spacing: -0.01em; }
 [class*="st-key-msg_bot_"] [data-testid="stExpander"] { border: 1px solid var(--line); border-radius: 12px; margin-top: 0.4rem; }
 [class*="st-key-msg_bot_"] [data-testid="stDownloadButton"] button { min-height: 2.1rem; font-size: 0.85rem; margin-top: 0.4rem; }
 
-/* ---------- sidebar: header on top, scrollable chats in the middle, user card pinned to the bottom ---------- */
+/* ---------- sidebar: fixed header, the chat list fills the free space and is the only part that scrolls ---------- */
 [data-testid="stSidebar"] { border-right: 1px solid var(--line); }
-[data-testid="stSidebarContent"] { display: flex; flex-direction: column; height: 100%; }
-[data-testid="stSidebarUserContent"] { flex: 1 1 auto; display: flex; flex-direction: column; }
-[data-testid="stSidebarUserContent"] > div { flex: 1 1 auto; display: flex; flex-direction: column; }
-[data-testid="stSidebarUserContent"] > div > [data-testid="stVerticalBlock"] { flex: 1 1 auto; }
-[data-testid="stLayoutWrapper"]:has(> [class*="st-key-side_bottom"]) { margin-top: auto; }
-.st-key-side_history, .st-key-side_history > [data-testid="stVerticalBlock"] {
-    height: 360px !important; height: calc(100dvh - 400px) !important; min-height: 150px;
+[data-testid="stSidebarContent"] { display: flex; flex-direction: column; height: 100%; overflow: hidden !important; }
+[data-testid="stSidebarHeader"] { height: 2.75rem; min-height: 2.75rem; padding: 0.5rem 1rem 0 1rem; margin-bottom: 0; }
+[data-testid="stSidebarUserContent"] {
+    flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
+    padding: 0.5rem 1rem 1rem 1rem !important;
 }
-.st-key-side_history [data-testid="stVerticalBlock"] { gap: 0.15rem; }
+[data-testid="stSidebarUserContent"] > div { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+[data-testid="stSidebarUserContent"] > div > [data-testid="stVerticalBlock"] {
+    flex: 1 1 0; min-height: 0; height: 100%; gap: 0.9rem;
+}
+/* the list takes whatever height is left, so the user card can never be pushed off the screen */
+[data-testid="stLayoutWrapper"]:has(> .st-key-side_history) { flex: 1 1 0 !important; min-height: 96px; height: auto !important; }
+.st-key-side_history { height: 100% !important; gap: 0.2rem !important; }
+.st-key-side_top { gap: 0.7rem !important; }
+.st-key-side_bottom { gap: 0.7rem !important; }
+.st-key-side_bottom hr { margin: 0; }
+/* Streamlit pulls markdown up by 1rem; cancel that here so the rows do not overlap */
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"], [data-testid="stMarkdownContainer"]:has(> .hist-row) { margin-bottom: 0 !important; }
+.brand { display: flex; align-items: center; gap: 0.6rem; font-weight: 700; font-size: 1.05rem;
+    line-height: 1.2; letter-spacing: -0.01em; }
+.brand img { flex: 0 0 auto; }
+.sidelabel { font-size: 0.8rem; opacity: 0.6; letter-spacing: 0.04em; text-transform: uppercase; margin-top: 0.2rem; }
+/* chat titles: left aligned, same left edge as the brand and the buttons */
 .st-key-side_history [data-testid="stButton"] button {
-    min-height: 2.1rem; padding: 0.2rem 0.6rem; font-size: 0.9rem; justify-content: flex-start; text-align: left;
+    min-height: 2.2rem; padding: 0.25rem 0.7rem; font-size: 0.9rem; justify-content: flex-start !important;
 }
-.st-key-side_history [data-testid="stButton"] button p { text-align: left; }
-.user-card { display: flex; align-items: center; gap: 0.7rem; padding: 0.3rem 0; }
+.st-key-side_history [data-testid="stButton"] button > div { width: 100%; justify-content: flex-start !important; }
+.st-key-side_history [data-testid="stButton"] button p { width: 100%; text-align: left !important; margin: 0; }
+.user-card { display: flex; align-items: center; gap: 0.7rem; }
 .avatar { width: 38px; height: 38px; border-radius: 50%; display: flex; align-items: center;
     justify-content: center; font-weight: 700; color: #fff; background: #4F46E5; flex: 0 0 auto; }
-.uname { font-weight: 600; line-height: 1.2; }
-.uid { font-size: 0.8rem; opacity: 0.65; }
+.uname { font-weight: 600; line-height: 1.25; }
+.uid { font-size: 0.8rem; opacity: 0.65; line-height: 1.25; }
 
 /* ---------- welcome and login ---------- */
-.welcome { text-align: center; margin: 10vh 0 1.5rem 0; }
-.welcome h2 { margin-bottom: 0.2rem; }
-.welcome p { opacity: 0.7; }
-.bot-badge { font-size: 2.6rem; line-height: 1; margin-bottom: 0.5rem; }
+.welcome { text-align: center; margin: 6vh 0 1.2rem 0; }
+.welcome h2 { margin: 0 0 0.5rem 0; padding: 0; line-height: 1.2; }
+.welcome p { opacity: 0.7; margin: 0; }
+.bot-badge { display: flex; justify-content: center; margin-bottom: 1rem; }
+/* no link icon next to headings */
+[data-testid="stHeaderActionElements"], [data-testid="stMarkdownContainer"] h1 a,
+[data-testid="stMarkdownContainer"] h2 a, [data-testid="stMarkdownContainer"] h3 a { display: none !important; }
 
 /* ---------- HR page ---------- */
-.st-key-hr_header [data-testid="stHorizontalBlock"] { align-items: center; }
-.st-key-hr_header h1 { padding: 0; }
+.st-key-hr_header { flex-direction: row !important; align-items: center; justify-content: space-between; gap: 1rem; }
+.st-key-hr_header h1 { padding: 0; margin: 0; font-size: 2rem; line-height: 1.2; }
+.st-key-hr_header [data-testid="stElementContainer"] { width: auto !important; }
+.st-key-hr_header [data-testid="stMarkdownContainer"] { margin-bottom: 0 !important; }
+.st-key-hr_logout button { min-width: 7rem; }
+.st-key-hr_header + [data-testid="stElementContainer"] { margin-top: -0.5rem; }
+[data-testid="stHeading"] h3 { font-size: 1.2rem; font-weight: 600; padding: 0.25rem 0 0.1rem 0; }
 [data-testid="stVerticalBlockBorderWrapper"] { border-radius: 14px; }
-[class*="st-key-req_"] [data-testid="stHorizontalBlock"] { max-width: 360px; }
+/* request and escalation cards: even spacing between the lines and the buttons */
+[class*="st-key-req_"], [class*="st-key-esc_"] { gap: 0.6rem !important; }
+[class*="st-key-req_"] [data-testid="stMarkdownContainer"], [class*="st-key-esc_"] [data-testid="stMarkdownContainer"] { margin-bottom: 0 !important; }
+[class*="st-key-req_"] p, [class*="st-key-esc_"] p { margin: 0; }
+[class*="st-key-req_"] [data-testid="stCaptionContainer"], [class*="st-key-esc_"] [data-testid="stCaptionContainer"] { margin: 0 !important; }
+[class*="st-key-req_"] [data-testid="stHorizontalBlock"] { max-width: 360px; gap: 0.75rem; }
+[class*="st-key-approve_"], [class*="st-key-reject_"], [class*="st-key-approve_"] [data-testid="stButton"],
+[class*="st-key-reject_"] [data-testid="stButton"], [class*="st-key-approve_"] button, [class*="st-key-reject_"] button { width: 100% !important; }
+/* the two history boxes are only as tall as their rows, up to a limit, then they scroll */
+[data-testid="stLayoutWrapper"]:has(> .st-key-recent_decisions), [data-testid="stLayoutWrapper"]:has(> .st-key-recent_resolved) {
+    height: auto !important; flex: 0 0 auto !important; }
+.st-key-recent_decisions { height: auto !important; max-height: 250px; overflow-y: auto; }
+.st-key-recent_resolved { height: auto !important; max-height: 300px; overflow-y: auto; }
+/* history lists: one box, thin dividers between rows */
+.hist-row { display: flex; align-items: center; gap: 0.8rem; padding: 0.6rem 0.2rem; border-bottom: 1px solid var(--line); }
+.hist-row:last-child { border-bottom: none; }
+.hist-row .txt { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.pill { flex: 0 0 auto; min-width: 5.5rem; text-align: center; font-size: 0.78rem; font-weight: 600;
+    padding: 0.15rem 0.6rem; border-radius: 999px; text-transform: capitalize; }
+.pill.ok { color: #15803d; background: rgba(34, 197, 94, 0.16); }
+.pill.no { color: #b91c1c; background: rgba(239, 68, 68, 0.14); }
+.pill.done { color: #4338ca; background: rgba(99, 102, 241, 0.16); }
+[data-testid="stVerticalBlock"]:has(> .element-container .hist-row) { gap: 0; }
 
 /* ---------- phones ---------- */
 @media (max-width: 640px) {
-    .block-container { padding: 1rem 0.8rem 5rem; }
+    .block-container { padding: 4.5rem 0.8rem 5rem; }
     .welcome { margin: 4vh 0 1rem 0; }
     [data-testid="stButton"] button, [data-testid="stDownloadButton"] button,
     [data-testid="stFormSubmitButton"] button { min-height: 2.75rem; }
     [class*="st-key-msg_user_"] > [data-testid="stElementContainer"]:has(> [data-testid="stMarkdown"]) { max-width: 92%; }
     [class*="st-key-msg_bot_"] > [data-testid="stElementContainer"]:has(> [data-testid="stMarkdown"]) { max-width: 100%; }
     [class*="st-key-msg_bot_"] { padding-left: 40px; }
-    [class*="st-key-msg_bot_"]::before { width: 30px; height: 30px; font-size: 16px; }
+    [class*="st-key-msg_bot_"]::before { width: 30px; height: 30px; }
     /* Approve / Reject and the HR header stay on one row instead of stacking */
     [class*="st-key-req_"] [data-testid="stHorizontalBlock"], .st-key-hr_header [data-testid="stHorizontalBlock"] {
         flex-wrap: nowrap !important; max-width: 100%;
@@ -142,10 +213,11 @@ h1, h2, h3, h4 { letter-spacing: -0.01em; }
     [class*="st-key-req_"] [data-testid="stColumn"] { min-width: 0 !important; flex: 1 1 0 !important; width: auto !important; }
     .st-key-hr_header [data-testid="stColumn"]:first-child { min-width: 0 !important; flex: 1 1 auto !important; width: auto !important; }
     .st-key-hr_header [data-testid="stColumn"]:last-child { flex: 0 0 auto !important; width: auto !important; min-width: 96px !important; }
-    .st-key-hr_header h1 { font-size: 1.7rem; }
+    .st-key-hr_header h1 { font-size: 1.6rem; }
+    .hist-row { flex-wrap: wrap; gap: 0.4rem; }
 }
 </style>
-"""
+""".replace("__BOT__", BOT_URI)
 
 
 @st.cache_resource(show_spinner="Preparing the knowledge base (first start only)...")
@@ -226,7 +298,7 @@ def login_screen():
     _, middle, _ = st.columns([1, 1.4, 1])
     with middle:
         st.markdown(
-            "<div class='welcome' style='margin-top:8vh'><div class='bot-badge'>🤖</div><h2>HR Policy Assistant</h2>"
+            "<div class='welcome' style='margin-top:8vh'><div class='bot-badge'>" + bot_icon(56) + "</div><h2>HR Policy Assistant</h2>"
             "<p>Sign in to ask about HR policies, check your leave balance, "
             "or get pointed to HR.</p></div>",
             unsafe_allow_html=True,
@@ -274,24 +346,35 @@ def fmt_day(value) -> str:
     return f"{d.day} {d.strftime('%b %Y')}"  # no %-d, so it also works on Windows
 
 
-def resolve(request_id: int):
-    try:
-        result = tools.resolve_escalation(request_id)
-    except Exception as e:
-        print(f"[error] resolving failed: {e}")
-        result = {"ok": False, "message": "Something went wrong. Please check the request and try again."}
-    st.session_state.hr_notice = (result["ok"], result["message"])
+def _run_once(kind: str, request_id: int, spinner_text: str, action):
+    """Run one HR action with a spinner. A repeated click on the same request in this session is ignored,
+    so a double click cannot show an 'already decided' warning over the real result."""
+    handled = st.session_state.setdefault("hr_handled", set())
+    key = (kind, request_id)
+    if key not in handled:
+        with st.spinner(spinner_text):
+            try:
+                result = action(request_id)
+            except Exception as e:
+                print(f"[error] {kind} failed: {e}")
+                result = {"ok": False, "message": "Something went wrong. Please check the request and try again."}
+        if result["ok"]:
+            handled.add(key)
+        st.session_state.hr_notice = (result["ok"], result["message"])
     st.rerun()
+
+
+def resolve(request_id: int):
+    _run_once("resolve", request_id, "Marking as resolved...", tools.resolve_escalation)
 
 
 def decide(request_id: int, approve: bool):
-    try:
-        result = tools.decide_leave_request(request_id, approve)
-    except Exception as e:
-        print(f"[error] decision failed: {e}")
-        result = {"ok": False, "message": "Something went wrong. Please check the request and try again."}
-    st.session_state.hr_notice = (result["ok"], result["message"])
-    st.rerun()
+    _run_once(
+        "approve" if approve else "reject",
+        request_id,
+        "Approving..." if approve else "Rejecting...",
+        lambda rid: tools.decide_leave_request(rid, approve),
+    )
 
 
 try:
@@ -317,18 +400,12 @@ def watch_for_new_requests():
 
 
 def hr_screen():
-    with st.sidebar:
-        st.markdown("#### 🤖 HR Policy Assistant")
-        st.caption("Leave approvals and escalations")
-
-    with st.container(key="hr_header"):
-        title_col, logout_col = st.columns([5, 1])
-        with title_col:
-            st.title("HR page")
-        with logout_col:
-            if wide_button("Log out", key="hr_logout"):
-                st.session_state.clear()
-                st.rerun()
+    with st.container(key="hr_header"):  # title on the left, Log out on the right, centered on one line
+        st.title("HR page")
+        if st.button("Log out", key="hr_logout"):
+            st.session_state.clear()
+            st.rerun()
+    st.caption("Leave approvals and escalations")
     notice = st.session_state.pop("hr_notice", None)
     if notice:
         (st.success if notice[0] else st.warning)(notice[1])
@@ -360,6 +437,13 @@ def hr_screen():
     watch_for_new_requests()
 
 
+def hist_row(text: str, status: str, kind: str):
+    """One line in a history list: the text on the left and a small colored status label on the right.
+    `text` must already be HTML-escaped."""
+    st.markdown(f"<div class='hist-row'><span class='txt'>{text}</span>"
+                f"<span class='pill {kind}'>{html.escape(status)}</span></div>", unsafe_allow_html=True)
+
+
 def show_requests(pending: list, decided: list):
     st.subheader(f"Waiting for a decision ({len(pending)})")
     if not pending:
@@ -382,12 +466,12 @@ def show_requests(pending: list, decided: list):
         st.subheader("Recent decisions")
         with st.container(height=250, border=True, key="recent_decisions"):
             for r in decided:
-                icon = "✅" if r["status"] == "approved" else "❌"
-                with st.container(border=True):
-                    st.markdown(
-                        f"{icon} #{r['id']} {r['name']}, {r['leave_type']} leave, {fmt_day(r['start_date'])} to "
-                        f"{fmt_day(r['end_date'])}: **{r['status']}**"
-                    )
+                ok = r["status"] == "approved"
+                hist_row(
+                    f"#{r['id']} {html.escape(r['name'])}, {html.escape(r['leave_type'])} leave, "
+                    f"{fmt_day(r['start_date'])} to {fmt_day(r['end_date'])}",
+                    r["status"], "ok" if ok else "no",
+                )
 
 
 def show_escalations(open_rows, resolved_rows):
@@ -409,8 +493,7 @@ def show_escalations(open_rows, resolved_rows):
         st.subheader("Recently resolved")
         with st.container(height=300, border=True, key="recent_resolved"):
             for r in resolved_rows:
-                with st.container(border=True):
-                    st.markdown(f"✅ #{r['id']} {r['name']}, {r['reason']}: **resolved**")
+                hist_row(f"#{r['id']} {html.escape(r['name'])}, {html.escape(str(r['reason']))}", "resolved", "done")
 
 
 # ----------------------------------------------------------------- chat screen
@@ -444,12 +527,13 @@ def sidebar():
     employee = st.session_state.employee
     with st.sidebar:
         with st.container(key="side_top"):
-            st.markdown("#### 🤖 HR Policy Assistant")
+            st.markdown(f"<div class='brand'>{bot_icon(28)}<span>HR Policy Assistant</span></div>",
+                        unsafe_allow_html=True)
             if wide_button("＋ New chat", key="new_chat", type="primary"):
                 if st.session_state.chats[st.session_state.current]["messages"]:
                     new_chat()
                 st.rerun()
-            st.caption("Previous chats")
+            st.markdown("<div class='sidelabel'>Previous chats</div>", unsafe_allow_html=True)
 
         # only this list scrolls: the header above and the user card below stay in place
         with st.container(height=360, border=False, key="side_history"):
@@ -495,7 +579,7 @@ def chat_screen():
     clicked = None
     if not messages:
         st.markdown(
-            f"<div class='welcome'><div class='bot-badge'>🤖</div><h2>Hello, {html.escape(employee['name'])}</h2>"
+            f"<div class='welcome'><div class='bot-badge'>{bot_icon(56)}</div><h2>Hello, {html.escape(employee['name'])}</h2>"
             "<p>Ask about HR policies or your leave. Answers show their source.</p></div>",
             unsafe_allow_html=True,
         )

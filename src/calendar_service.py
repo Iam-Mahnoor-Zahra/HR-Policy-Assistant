@@ -9,6 +9,7 @@ Settings (environment or hosting secrets):
 Nothing here raises when the calendar is not set up: is_enabled() is False and the callers
 use the Supabase holidays table instead. Real errors are raised, and the callers decide what to do.
 """
+import base64
 import json
 import os
 from datetime import date, timedelta
@@ -135,10 +136,27 @@ def add_leave_event(employee_name: str, employee_id: str, leave_type: str, start
     return service.events().insert(calendarId=calendar_id, body=body).execute()["id"]
 
 
-def share_calendar(calendar_id: str, emails: list) -> dict:
+def subscribe_link(calendar_id: str) -> str:
+    """The link that adds a calendar to a person's own Google Calendar list (they must be signed in
+    with an account that has access)."""
+    cid = base64.b64encode(calendar_id.encode()).decode().rstrip("=")
+    return f"https://calendar.google.com/calendar/u/0?cid={cid}"
+
+
+def service_account_email() -> str:
+    """The service account's email address, or an empty text when the key cannot be read."""
+    try:
+        return _load_key().get("client_email", "")
+    except Exception:
+        return ""
+
+
+def share_calendar(calendar_id: str, emails: list, notify: bool = False) -> dict:
     """Give each email read-only access to a calendar. Emails that already have access are skipped.
 
-    Returns {"added": [...], "skipped": [...], "failed": {email: reason}}. No invitation emails are sent.
+    Returns {"added": [...], "skipped": [...], "failed": {email: reason}}.
+    By default no invitation emails are sent. With notify=True, Google emails each NEWLY added person
+    an invitation (people who already had access get nothing).
     The service account needs "Make changes and manage sharing" on the calendar.
     """
     service = _service()
@@ -161,7 +179,7 @@ def share_calendar(calendar_id: str, emails: list) -> dict:
             service.acl().insert(
                 calendarId=calendar_id,
                 body={"role": "reader", "scope": {"type": "user", "value": email}},
-                sendNotifications=False,
+                sendNotifications=bool(notify),
             ).execute()
             out["added"].append(email)
         except Exception as e:
