@@ -1,5 +1,3 @@
-# HR-Policy-Assistant
-AI assistant for HR policy questions with cited answers, leave balance lookup, and human escalation (LangGraph, RAG, Streamlit).
 # HR Policy Assistant
 
 An agent-driven chat system for employee HR questions and requests, with a separate page for HR.
