@@ -115,6 +115,7 @@ def test_greeting_gets_a_help_message_without_model(monkeypatch):
 def test_model_marked_other_is_not_escalated(monkeypatch):
     _patch_tools(monkeypatch)
     _router(monkeypatch, route="other")
+    _policy_missing(monkeypatch)
     out = agent.run_agent("EMP001", "What is the weather today?")
     assert out["path"] == "other" and out["pending"] is None
 
@@ -205,3 +206,51 @@ def test_holiday_route_needs_holiday_words_otherwise_policy(monkeypatch):
     _policy_found(monkeypatch)
     out = agent.run_agent("EMP001", "How many days can I carry forward?")
     assert out["path"] == "policy"
+
+
+# ------------------------------------- "other" lets the policy search decide (no keywords)
+def test_other_is_answered_from_the_policies_when_a_section_matches(monkeypatch):
+    _patch_tools(monkeypatch)
+    _router(monkeypatch, route="other")
+    monkeypatch.setattr(agent, "answer_policy_question", lambda q: {
+        "found": True, "answer": "Treat everyone with respect and professionalism.", "reason": "",
+        "citations": [{"label": "Code of Conduct, Section 1.1 (Expected behaviour)",
+                       "file": "code_of_conduct.md", "section": "1.1"}]})
+    out = agent.run_agent("EMP001", "what should be the employee behaviour in a company")
+    assert out["path"] == "policy" and "Section 1.1" in out["reply"]
+    assert out["citations"] and out["pending"] is None
+
+
+def test_other_with_no_matching_section_shows_the_help_text(monkeypatch):
+    _patch_tools(monkeypatch)
+    _router(monkeypatch, route="other")
+    _policy_missing(monkeypatch)
+    out = agent.run_agent("EMP001", "What is the weather today?")
+    assert out["path"] == "other" and "HR Policy Assistant" in out["reply"]
+    assert out["pending"] is None
+
+
+def test_what_can_you_do_never_searches_the_policies(monkeypatch):
+    _patch_tools(monkeypatch)
+    _router(monkeypatch, route="other")
+
+    def no_search(q):
+        raise AssertionError("the policy search must not run for questions about the assistant")
+
+    monkeypatch.setattr(agent, "answer_policy_question", no_search)
+    out = agent.run_agent("EMP001", "What can you do?")
+    assert out["path"] == "other" and "HR Policy Assistant" in out["reply"]
+
+
+def test_greeting_never_searches_the_policies(monkeypatch):
+    _patch_tools(monkeypatch)
+
+    def no_model():
+        raise AssertionError("no model for a greeting")
+
+    def no_search(q):
+        raise AssertionError("no search for a greeting")
+
+    monkeypatch.setattr(agent, "get_llm", no_model)
+    monkeypatch.setattr(agent, "answer_policy_question", no_search)
+    assert agent.run_agent("EMP001", "Thanks")["path"] == "other"

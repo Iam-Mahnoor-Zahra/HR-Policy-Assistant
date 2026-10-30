@@ -1,6 +1,6 @@
 # Code of Conduct
 
-**Company:** ExampleCorp | **Owner:** Human Resources | **Version:** 1.0
+**Company:** ExampleCorp | **Owner:** Human Resources | **Version:** 1.0 | **HR Email:** imahnooriqbal@gmail.com
 
 ## 1. Respectful Workplace
 

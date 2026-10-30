@@ -5,7 +5,7 @@
                         -> status    -> request status tool
                         -> holiday   -> holiday lookup
                         -> leave_request -> rule checks -> ask to confirm (needs the employee's yes)
-                        -> other     -> short help message (greetings, thanks, off-topic)
+                        -> other     -> policy search first; the help message only if nothing matches
                         -> policy    -> policy search -> answer with citation
                                                       -> no source found -> offer to email HR
 
@@ -45,7 +45,7 @@ balance: ONLY when the employee asks for their OWN current leave numbers (days l
 status: the employee asks about the status of their own leave request or HR request (pending, approved, rejected, open, replied).
 holiday: the employee asks about company holidays: whether a date is a holiday, or which holidays are coming up.
 policy: any question about company rules, limits, eligibility or procedures, or any other HR topic (pay, benefits, insurance, contracts), even if it mentions "I" or leave days. A later step checks whether the documents cover it.
-other: ONLY greetings, thanks, questions about what the assistant can do, or topics clearly unrelated to work.
+other: ONLY greetings, thanks, questions about what the assistant can do, or topics clearly unrelated to work. When unsure whether a work question is covered, choose policy: the document search decides, never you.
 
 Examples:
 - "How many annual leave days do I have left?" -> balance (annual, remaining)
@@ -65,6 +65,9 @@ Examples:
 - "Can I take next Monday off?" -> leave_request (annual, next Monday)
 - "How many annual leave days can I take?" -> policy (it asks about a rule, it does not book leave)
 - "How do I request sick leave?" -> policy
+- "What should employee behaviour be in a company?" -> policy (conduct)
+- "Can I work from home?" -> policy (remote work)
+- "What time should I arrive at the office?" -> policy (attendance)
 - "Hi" -> other
 - "What can you do?" -> other
 - "What is the weather today?" -> other
@@ -105,6 +108,9 @@ HR_TOPICS = re.compile(
 
 # Plain greetings and thanks are answered without calling the model.
 GREETING = re.compile(r"(hi+|hello|hey|salam|assalam[\w\s]*|thanks|thank you|thx|ok|okay)[\s!.?]*", re.I)
+
+# Questions about the assistant itself get the help text without a policy search.
+ABOUT_ASSISTANT = re.compile(r"\b(what can you do|what do you do|who are you|what are you|how can you help|help me)\b", re.I)
 
 # Plain yes / no answers (used for the confirmation steps). A reply only counts if it is short,
 # has no question mark, and every word is a known yes or no word, so "yes but what about sick leave?"
@@ -421,7 +427,20 @@ def leave_request_node(state: AgentState) -> dict:
 
 
 def other_node(state: AgentState) -> dict:
-    return {"reply": HELP_TEXT, "path": "other"}
+    """The model said "other". Before showing the help text, let the policy search decide.
+
+    The documents are the only thing that knows what is covered, so a new policy
+    needs no new keywords: if a section matches, answer it with a citation.
+    Greetings and "what can you do?" never search. If nothing matches, show the help text.
+    """
+    question = state["question"].strip()
+    if GREETING.fullmatch(question) or ABOUT_ASSISTANT.search(question):
+        return {"reply": HELP_TEXT, "path": "other"}
+    result = answer_policy_question(state["question"])
+    if not result["found"]:
+        return {"reply": HELP_TEXT, "path": "other"}
+    lines = [result["answer"]] + [f"Source: {c['label']}" for c in result["citations"]]
+    return {"reply": "\n".join(lines), "citations": result["citations"], "path": "policy"}
 
 
 def escalate_node(state: AgentState) -> dict:
