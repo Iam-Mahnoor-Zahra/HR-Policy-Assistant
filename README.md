@@ -7,7 +7,7 @@ It answers from the company's own policy documents and always shows its source. 
 > AtomCamp AI Bootcamp, final project (NLP / LLM track). All company data, names, policies and dates are fictional.
 
 **Live demo:** `<https://hr-policy-assistant-bot.streamlit.app/>`
-`
+
 
 ---
 
@@ -32,17 +32,9 @@ It answers from the company's own policy documents and always shows its source. 
 
 ## 2. How it works
 
-```mermaid
-flowchart TD
-    E[Employee chat] --> A[Agent - LangGraph]
-    H[HR page] --> T
-    A --> T[Tools]
-    T --> P[Policy search - Chroma]
-    T --> D[(Supabase)]
-    T --> M[Email - Gmail SMTP]
-    T --> C[Google Calendar]
-    A --> L[LLM - OpenAI]
-```
+![Architecture](assets/architecture.png)
+
+The employee chat goes through the agent to the employee tools. The HR page goes straight to the HR tools. Both sets of tools use the database, email and the calendar.
 
 ### How one message is handled
 
@@ -116,7 +108,7 @@ Rules checked before a request is saved:
 ```text
 HR-Policy-Assistant/
 ├── app.py                  Streamlit app: employee login, chat, HR login, HR page
-├── assets/icon.png         Browser tab icon
+├── assets/                 Browser tab icon and the architecture picture
 ├── conftest.py             Test setup (calendar off, database stubs)
 ├── requirements.txt
 ├── .env.example            Copy to .env and fill in
@@ -401,3 +393,6 @@ GOOGLE_SERVICE_ACCOUNT_JSON = '''{ ...the whole JSON key... }'''
 
 ---
 
+## 12. Author
+
+Mahnoor Zahra, AtomCamp AI Bootcamp. Trainer: Mr. Muhammad Umair.
