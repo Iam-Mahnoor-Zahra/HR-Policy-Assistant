@@ -4,7 +4,6 @@ An agent-driven chat system for employee HR questions and requests, with a separ
 
 It answers from the company's own policy documents and always shows its source. It also uses tools: a database, email and a calendar. A human stays in control of every important action: the employee confirms, and HR approves.
 
-> AtomCamp AI Bootcamp, final project (NLP / LLM track). All company data, names, policies and dates are fictional.
 
 **Live demo:** `<https://hr-policy-assistant-bot.streamlit.app/>`
 
