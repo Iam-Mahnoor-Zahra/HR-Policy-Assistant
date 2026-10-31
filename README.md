@@ -392,6 +392,3 @@ GOOGLE_SERVICE_ACCOUNT_JSON = '''{ ...the whole JSON key... }'''
 
 ---
 
-## 12. Author
-
-Mahnoor Zahra, AtomCamp AI Bootcamp. Trainer: Mr. Muhammad Umair.
